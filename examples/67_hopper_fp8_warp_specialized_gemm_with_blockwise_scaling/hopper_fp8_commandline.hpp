@@ -41,9 +41,9 @@ struct Options {
   bool device_scale = false;
   bool save_aux = true;
   bool save_amax = true;
-  int iterations = 1000;
-  int warmup = 1000;
-  int m = 1024, n = 512, k = 1024, l = 1;
+  int iterations = 0;
+  int warmup = 0;
+  int m = 256, n = 512, k = 1024, l = 1;
   RasterOrderOptions raster;
   int swizzle;
   float epsilon = 0.02f;

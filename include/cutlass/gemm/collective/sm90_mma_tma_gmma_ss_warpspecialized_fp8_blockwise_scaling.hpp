@@ -166,7 +166,7 @@ struct CollectiveMma<
       make_shape(shape<1>(TileShape{}), shape<2>(TileShape{}), Int<DispatchPolicy::Stages>{}),
       cute::conditional_t< ::cutlass::gemm::detail::is_major<0,StrideB>(), Step<_2,_1,_3>, Step<_1,_2,_3>>{}));
 
-  // Block scaling gmem-to-smem copy atom 
+  // Block scaling gmem-to-smem copy atom
   //  we can have partial tiles in M or N, so don't vectorize those loads
   using CopyAtomSFA = Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<ElementBlockScale>, ElementBlockScale>;
   using CopyAtomSFB = Copy_Atom<SM80_CP_ASYNC_CACHEALWAYS<ElementBlockScale>, ElementBlockScale>;
@@ -217,7 +217,7 @@ struct CollectiveMma<
     StrideA dA;
     ElementB const* ptr_B;
     StrideB dB;
-    ElementBlockScale const* ptr_SFA; 
+    ElementBlockScale const* ptr_SFA;
     LayoutSFA layout_SFA;
     ElementBlockScale const* ptr_SFB;
     LayoutSFB layout_SFB;
@@ -334,6 +334,20 @@ struct CollectiveMma<
           Shape<Int<ScaleNsPerTile>, Int<1>>{},
           _1{});
     }
+    
+    // PRINT(TileShape{});
+    // PRINT(LayoutSFA{});
+    // PRINT(LayoutSFB{});
+    // PRINT(SmemLayoutSFA{});
+    // PRINT(SmemLayoutSFB{});
+    // PRINT(ScaleGranularityM);
+    // PRINT(ScaleMsPerTile);
+    // PRINT(ScaleNsPerTile);
+    // PRINT(tensor_sfa);
+    // PRINT(tensor_sfb);
+    // PRINT(tma_load_sfa);
+    // PRINT(tma_load_sfb);
+    
     uint32_t transaction_bytes_mk = TmaTransactionBytesMK;
     uint32_t transaction_bytes_nk = TmaTransactionBytesNK;
     uint32_t transaction_bytes_sfa = TmaTransactionBytesSFA;
@@ -544,6 +558,35 @@ struct CollectiveMma<
       }
     }();
 
+    // if (thread(0)) {
+    //   PRINT(mainloop_params.layout_SFA);
+    //   PRINT(mainloop_params.layout_SFB);
+    //   PRINT(SmemLayoutAtomA{});
+    //   PRINT(SmemLayoutAtomB{});
+    //   PRINT(SmemLayoutA{});
+    //   PRINT(SmemLayoutB{});
+    //   PRINT(sA);
+    //   PRINT(sB);
+    //   PRINT(sSFA);
+    //   PRINT(sSFB);
+    //   PRINT(gA_mkl);
+    //   PRINT(gB_nkl);
+    //   PRINT(mSFA_mkl);
+    //   PRINT(mSFB_nkl);
+    //   PRINT(gA);
+    //   PRINT(gB);
+    //   PRINT(gSFA);
+    //   PRINT(gSFB);
+    //   PRINT(tAgA);
+    //   PRINT(tAsA);
+    //   PRINT(tBgB);
+    //   PRINT(tBsB);
+    //   PRINT(tAgA_SFA);
+    //   PRINT(tAsA_SFA);
+    //   PRINT(tBgB_SFB);
+    //   PRINT(tBsB_SFB);
+    // }
+
     uint16_t mcast_mask_a = 0;
     uint16_t mcast_mask_b = 0;
     uint16_t mcast_mask_sf = 0;
@@ -607,7 +650,7 @@ struct CollectiveMma<
   CUTLASS_DEVICE void
   load_auxiliary(
       Params const& mainloop_params,
-      MainloopPipeline pipeline, 
+      MainloopPipeline pipeline,
       PipelineState smem_pipe_write,
       cute::tuple<TensorA, TensorB, TensorScaleA, TensorScaleB> const& load_inputs,
       BlockCoord const& blk_coord,
@@ -639,7 +682,7 @@ struct CollectiveMma<
 
     TiledCopy scale_copy_a = make_tiled_copy(CopyAtomSFA{},
       Layout<Shape<_32>>{}, Layout<Shape<_1>>{});
-    TiledCopy scale_copy_b = make_tiled_copy(CopyAtomSFB{}, 
+    TiledCopy scale_copy_b = make_tiled_copy(CopyAtomSFB{},
       Layout<Shape<_32>>{}, Layout<Shape<_1>>{});
     ThrCopy thr_scale_copy_a = scale_copy_a.get_slice(thread_idx);
     ThrCopy thr_scale_copy_b = scale_copy_b.get_slice(thread_idx);
@@ -657,6 +700,28 @@ struct CollectiveMma<
 
     auto SFA_shape = shape(mainloop_params.layout_SFA);
     auto SFB_shape = shape(mainloop_params.layout_SFB);
+    
+    // if (thread(96, 0)) {    
+    //   PRINT(scale_copy_b);
+    //   PRINT(mSFB_nkl);
+    //   PRINT(gSFB_nkl);
+    //   PRINT(gSFB_k);
+    //   PRINT(tSFBgSFB_k);
+    //   PRINT(filter_zeros(tSFBgSFB_k(_,_,_,0)));
+    
+    //   PRINT(iSFB_nkl);
+    //   PRINT(cSFB_nkl);
+    //   PRINT(cSFB_k);
+    //   PRINT(tSFBcSFB_k);
+    //   PRINT(filter_zeros(tSFBcSFB_k(_,_,_,0)));
+      
+    //   PRINT(sSFB);
+    //   PRINT(tSFBsSFB);
+    //   filter_zeros(tSFBsSFB(_,_,_,0));
+    
+    //   PRINT(tSFBpSFB);
+    //   PRINT(SFB_shape);
+    // }
 
     // Mainloop
     CUTLASS_PRAGMA_NO_UNROLL
@@ -691,11 +756,23 @@ struct CollectiveMma<
       if constexpr (!IsTmaLoadSFA || !IsTmaLoadSFB) {
         pipeline.producer_commit(smem_pipe_write, cutlass::arch::cpasync_barrier_arrive_noinc);
       }
+      
+      // if (thread(96, 0)) {   
+      //   PRINT(ScaleNsPerTile);
+      //   PRINT(tSFBcSFB);
+      //   PRINT(tSFBcSFB_compact);
+      //   PRINT(size(tSFBpSFB));
+      //   PRINT(get<0>(tSFBcSFB_compact(0)));
+      //   PRINT(filter_zeros(tSFBgSFB_k(_,_,_,0)));
+      //   PRINT(filter_zeros(tSFBsSFB(_,_,_,0)));
+      // }
 
       ++k_tile_iter;
 
       // Advance smem_pipe_write
       ++smem_pipe_write;
+      
+      break;
     }
   }
 
@@ -778,21 +855,21 @@ struct CollectiveMma<
 
     // Block scaling
     Tensor sSFA = make_tensor(cute::make_smem_ptr(shared_tensors.smem_SFA.data()), make_layout(
-        make_shape(get<0>(shape(SmemLayoutSFA{})), 
-                   get<1>(TileShape{}), 
-                   make_shape(get<1>(shape(SmemLayoutSFA{})), 
+        make_shape(get<0>(shape(SmemLayoutSFA{})),
+                   get<1>(TileShape{}),
+                   make_shape(get<1>(shape(SmemLayoutSFA{})),
                    get<2>(shape(SmemLayoutSFA{})))),
-        make_stride(get<0>(stride(SmemLayoutSFA{})), _0{}, 
+        make_stride(get<0>(stride(SmemLayoutSFA{})), _0{},
                     make_stride(get<1>(stride(SmemLayoutSFA{})), get<2>(stride(SmemLayoutSFA{}))))
       ));                                                                                       // (BLK_M,BLK_N,(BLK_K,P))
     Tensor sSFB = make_tensor(cute::make_smem_ptr(shared_tensors.smem_SFB.data()), make_layout(
-        make_shape(get<0>(TileShape{}), 
-                   get<0>(shape(SmemLayoutSFB{})), 
-                   make_shape(get<1>(shape(SmemLayoutSFB{})), 
+        make_shape(get<0>(TileShape{}),
+                   get<0>(shape(SmemLayoutSFB{})),
+                   make_shape(get<1>(shape(SmemLayoutSFB{})),
                    get<2>(shape(SmemLayoutSFB{})))),
-        make_stride(_0{}, 
-                    get<0>(stride(SmemLayoutSFB{})), 
-                    make_stride(get<1>(stride(SmemLayoutSFB{})), 
+        make_stride(_0{},
+                    get<0>(stride(SmemLayoutSFB{})),
+                    make_stride(get<1>(stride(SmemLayoutSFB{})),
                     get<2>(stride(SmemLayoutSFB{}))))
       ));                                                                                       // (BLK_M,BLK_N,(BLK_K,P))
 
@@ -802,14 +879,14 @@ struct CollectiveMma<
 
     // Layout of warp group to thread mapping
 
-    static_assert(stride<0>(typename TiledMma::ALayout{}) == 0 and 
+    static_assert(stride<0>(typename TiledMma::ALayout{}) == 0 and
                   stride<0>(typename TiledMma::BLayout{}) == 0 and
                   size<0>(typename TiledMma::ALayout{}) == NumThreadsPerWarpGroup and
-                  size<0>(typename TiledMma::BLayout{}) == NumThreadsPerWarpGroup, 
+                  size<0>(typename TiledMma::BLayout{}) == NumThreadsPerWarpGroup,
                   "Stride of the first mode must be 0 and the size of the mode must be NumThreadsPerWarpGroup");
 
     constexpr int MmaWarpGroups = size(TiledMma{}) / NumThreadsPerWarpGroup;
-    Layout warp_group_thread_layout = make_layout(Int<MmaWarpGroups>{}, 
+    Layout warp_group_thread_layout = make_layout(Int<MmaWarpGroups>{},
                                                   Int<NumThreadsPerWarpGroup>{});
 
     int warp_group_idx = __shfl_sync(0xFFFFFFFF, thread_idx / NumThreadsPerWarpGroup, 0);
@@ -847,6 +924,20 @@ struct CollectiveMma<
     // Since scale factors always broadcast across MMA_K we slice that away
     Tensor tCrSFA = make_tensor_like<ElementBlockScale>(tCsSFA(_, _, _, _0{}));                     // (MMA,MMA_M,MMA_N)
     Tensor tCrSFB = make_tensor_like<ElementBlockScale>(tCsSFB(_, _, _, _0{}));                     // (MMA,MMA_M,MMA_N)
+    
+    if (thread(128, 0)) {
+      PRINT(sSFA);
+      PRINT(sSFB);
+      PRINT(tCsSFA);
+      PRINT(tCsSFB);
+      PRINT(tCrSFA);
+      PRINT(tCrSFB);
+      PRINT(tCsA);
+      PRINT(tCsB);
+      PRINT(accum);
+      PRINT(size<2>(tCrA));
+    }
+
 
     // Prologue GMMAs
 
