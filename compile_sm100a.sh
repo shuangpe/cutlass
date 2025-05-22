@@ -9,7 +9,7 @@ BUILD_DIR="build"
 # source ~/.bashrc
 
 # rm -rf $BUILD_DIR
-cmake -S . -B $BUILD_DIR -DCUTLASS_NVCC_ARCHS=100a -DCUTLASS_NVCC_KEEP=ON
+cmake -S . -B $BUILD_DIR -DCUTLASS_NVCC_ARCHS=100a -DCUTLASS_NVCC_KEEP=ON -DCMAKE_CXX_FLAGS="-D__STRICT_ANSI__"
 
 # Initialize an empty list to store filenames
 file_list=()
@@ -62,6 +62,11 @@ traverse_directory "./examples"
 
 # Iterate over the list and execute make for each filename
 for filename in "${file_list[@]}"; do
+    # Skip if filename doesn't contain 72
+    if [[ "$filename" != *72* ]]; then
+        echo "Skipping $filename (does not contain 72)"
+        continue
+    fi
     echo "cmake --build $BUILD_DIR --target $filename"
     cmake --build $BUILD_DIR --target $filename
 done
