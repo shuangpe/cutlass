@@ -16,6 +16,8 @@ show_help() {
 # Default parameters
 gpu_id=""
 dry_run=false
+# Define default operations to test
+operations=("Gemm" "BlockScaledGemm")
 
 # Hardcoded frequency profiles as tuples (min_freq max_freq)
 freq_profiles=(
@@ -59,7 +61,7 @@ fi
 # Function to validate GPU ID
 validate_gpu_id() {
   local gpu_id=$1
-  local gpu_count=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits)
+  local gpu_count=$(nvidia-smi --query-gpu=count --format=csv,noheader,nounits 2>/dev/null)
 
   if [ "$gpu_id" -ge "$gpu_count" ] || [ "$gpu_id" -lt 0 ]; then
     echo "Error: Invalid GPU ID. System has $gpu_count GPU(s), IDs range from 0 to $((gpu_count-1))"
@@ -85,6 +87,14 @@ current_date=$(date +"%Y%m%d")
 # Create report directory with date - use absolute path
 report_dir="$(pwd)/report_${current_date}"
 mkdir -p "$report_dir"
+
+# Create scripts directory inside report directory
+scripts_dir="${report_dir}/scripts"
+mkdir -p "$scripts_dir"
+
+# Create csv directory inside report directory for output CSV files
+csv_dir="${report_dir}/csv"
+mkdir -p "$csv_dir"
 
 # Create a log file to record all main script output
 log_file="${report_dir}/run_profiler_${current_date}.log"
@@ -157,15 +167,32 @@ chmod +x "$main_run_script"
 # Create script template sections - these don't change with frequency profiles
 script_header_template=(
   "#!/bin/bash"
-  "# Command to reproduce profiling at %MAX_FREQ%MHz for GPU ID %GPU_ID%"
+  "# Command to reproduce profiling at %MAX_FREQ%MHz for GPU ID %GPU_ID% with operation %OPERATION%"
   ""
   "# Exit immediately if a command exits with a non-zero status"
   "set -e"
+  ""
+  "# Default settings"
+  "save_log_to_file=false"
+  ""
+  "# Parse command line arguments"
+  "while getopts \"s\" opt; do"
+  "  case \${opt} in"
+  "    s )"
+  "      save_log_to_file=true"
+  "      ;;"
+  "    \\? )"
+  "      echo \"Invalid option: \$OPTARG\" 1>&2"
+  "      exit 1"
+  "      ;;"
+  "  esac"
+  "done"
   ""
   "# Define variables"
   "gpu_id=%GPU_ID%"
   "min_freq=%MIN_FREQ%"
   "max_freq=%MAX_FREQ%"
+  "operation=\"%OPERATION%\""
   ""
   "# Save original CUDA_VISIBLE_DEVICES value"
   "ORIGINAL_CUDA_VISIBLE_DEVICES=\${CUDA_VISIBLE_DEVICES:-}"
@@ -174,7 +201,7 @@ script_header_template=(
   ""
   "# Create logs directory and log file for profiler output"
   "mkdir -p \"${report_dir}/logs\""
-  "log_filename=\"${report_dir}/logs/profile-gemm-\${max_freq}mhz-gpu\${gpu_id}.log\""
+  "log_filename=\"${report_dir}/logs/profile-\${operation}-\${max_freq}mhz-gpu\${gpu_id}.log\""
   ""
 )
 
@@ -194,15 +221,24 @@ set_frequency_section=(
 
 run_profiler_section=(
   "# Run profiler"
-  "echo \"Running profiler with GPU \$gpu_id at frequency range \$min_freq MHz ~ \$max_freq MHz...\""
-  "/workspace/cutlass/build/tools/profiler/cutlass_profiler \\"
-  "  --operation=Gemm --op_class=tensorop \\"
-  "  --profiling-iterations=100 --warmup-iterations=10 \\"
-  "  --m=8192 --n=8192 --k=256,512,1024,2048,4096,8192 \\"
-  "  --providers=cutlass \\"
-  "  --output=\"${report_dir}/profile-gemm-\${max_freq}mhz-gpu\${gpu_id}.csv\" \\"
-  "  > \"\$log_filename\" 2>&1"
-  "echo \"Profiler output saved to \$log_filename\""
+  "echo \"Running profiler for operation \$operation with GPU \$gpu_id at frequency range \$min_freq MHz ~ \$max_freq MHz...\""
+  "if [ \"\$save_log_to_file\" = true ]; then"
+  "  echo \"Saving profiler output to \$log_filename\""
+  "  /workspace/cutlass/build/tools/profiler/cutlass_profiler \\"
+  "    --operation=\$operation \\"
+  "    --profiling-iterations=100 --warmup-iterations=10 \\"
+  "    --m=8192 --n=8192 --k=256,512,1024,2048,4096,8192 \\"
+  "    --providers=cutlass \\"
+  "    --output=\"${csv_dir}/profile-\${operation}-\${max_freq}mhz-gpu\${gpu_id}.csv\" \\"
+  "    > \"\$log_filename\" 2>&1"
+  "else"
+  "  /workspace/cutlass/build/tools/profiler/cutlass_profiler \\"
+  "    --operation=\$operation \\"
+  "    --profiling-iterations=100 --warmup-iterations=10 \\"
+  "    --m=8192 --n=8192 --k=256,512,1024,2048,4096,8192 \\"
+  "    --providers=cutlass \\"
+  "    --output=\"${csv_dir}/profile-\${operation}-\${max_freq}mhz-gpu\${gpu_id}.csv\""
+  "fi"
   ""
 )
 
@@ -232,13 +268,16 @@ generate_freq_script() {
   local gpu_id="$2"
   local min_freq="$3"
   local max_freq="$4"
+  local operation="$5"
 
   # Create script header with substituted values
   local script_header=()
+
   for line in "${script_header_template[@]}"; do
     line="${line//%GPU_ID%/$gpu_id}"
     line="${line//%MIN_FREQ%/$min_freq}"
     line="${line//%MAX_FREQ%/$max_freq}"
+    line="${line//%OPERATION%/$operation}"
     script_header+=("$line")
   done
 
@@ -252,22 +291,28 @@ generate_freq_script() {
 }
 
 # Generate individual frequency profile scripts and add them to main script
-for profile in "${freq_profiles[@]}"; do
-  read -r min_freq max_freq <<< "$profile"
 
-  # Create individual run script for this frequency with GPU ID in filename
-  freq_run_script="${report_dir}/run_${max_freq}mhz_gpu${gpu_id}.sh"
+for operation in "${operations[@]}"; do
+  # Convert operation name to lowercase
+  operation_lower="${operation,,}"
 
-  # Generate the frequency script
-  generate_freq_script "$freq_run_script" "$gpu_id" "$min_freq" "$max_freq"
+  for profile in "${freq_profiles[@]}"; do
+    read -r min_freq max_freq <<< "$profile"
 
-  # Add this frequency run to the main script with absolute path
-  main_script_addition=(
-    "echo \"Running profile for ${max_freq}MHz...\""
-    "\"${freq_run_script}\""
-    ""
-  )
-  append_lines_to_file "$main_run_script" "${main_script_addition[@]}"
+    # Create script file with lowercase naming in scripts subdirectory
+    freq_run_script="${scripts_dir}/run_${operation_lower}_${max_freq}mhz_gpu${gpu_id}.sh"
+
+    # Generate the frequency script
+    generate_freq_script "$freq_run_script" "$gpu_id" "$min_freq" "$max_freq" "$operation"
+
+    # Add this frequency and operation run to the main script with absolute path
+    main_script_addition=(
+      "echo \"Running profile for ${operation} at ${max_freq}MHz...\""
+      "\"${freq_run_script}\" -s"  # Add -s option to enable log saving
+      ""
+    )
+    append_lines_to_file "$main_run_script" "${main_script_addition[@]}"
+  done
 done
 
 append_to_file "$main_run_script" "echo \"All profiles completed.\""
