@@ -112,9 +112,9 @@ using OperatorClass       = cutlass::arch::OpClassTensorOp;                 // O
 
 // MMA and Cluster Tile Shapes
 // Shape of the tile computed by tcgen05 MMA, could be across 2 SMs if Cluster Shape %2 == 0 
-using MmaTileShape_MNK = Shape<_256,_128,_64>;                          
+using MmaTileShape_MNK = Shape<MS_M,_256,MS_K>;                          
 // Shape of the threadblocks in a cluster
-using ClusterShape_MNK = Shape<_2,_2,_1>;
+using ClusterShape_MNK = Shape<CS_M,CS_N,_1>;
 
 // Build the epilogue
 using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
@@ -471,6 +471,9 @@ int main(int argc, char const **args) {
     options.print_usage(std::cout) << std::endl;
     return 0;
   }
+  
+  // print_type<typename CollectiveMainloop::MainloopPipeline>();
+  // print_type<typename CollectiveMainloop::TiledMma>();
 
   //
   // Evaluate CUTLASS kernels
