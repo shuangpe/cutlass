@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# cmake .. -DCUTLASS_NVCC_ARCHS=100a -DCUTLASS_ENABLE_TESTS=OFF -DCUTLASS_UNITY_BUILD_ENABLED=ON -DCUTLASS_LIBRARY_OPERATIONS=gemm -DCUTLASS_LIBRARY_KERNELS=gemm_*_void*_2sm -DCUTLASS_LIBRARY_IGNORE_KERNELS=stream
+# make cutlass_profiler -j32
+
 # Function to display help information
 show_help() {
   echo "Usage: $0 -g <gpu_id> [-d] [-h]"
