@@ -6877,14 +6877,14 @@ def GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
 
   # layouts for ABC and their alignments. C alignment will be set later based on output type
   layouts = [
-    [[LayoutType.ColumnMajor, 8], [LayoutType.ColumnMajor, 8], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.ColumnMajor, 8], [LayoutType.RowMajor,    8], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.RowMajor,    8], [LayoutType.ColumnMajor, 8], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.RowMajor,    8], [LayoutType.RowMajor,    8], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.ColumnMajor, 8], [LayoutType.ColumnMajor, 8], [LayoutType.RowMajor,    0]],
-    [[LayoutType.ColumnMajor, 8], [LayoutType.RowMajor,    8], [LayoutType.RowMajor,    0]],
+    # [[LayoutType.ColumnMajor, 8], [LayoutType.ColumnMajor, 8], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.ColumnMajor, 8], [LayoutType.RowMajor,    8], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.RowMajor,    8], [LayoutType.ColumnMajor, 8], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.RowMajor,    8], [LayoutType.RowMajor,    8], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.ColumnMajor, 8], [LayoutType.ColumnMajor, 8], [LayoutType.RowMajor,    0]],
+    # [[LayoutType.ColumnMajor, 8], [LayoutType.RowMajor,    8], [LayoutType.RowMajor,    0]],
     [[LayoutType.RowMajor,    8], [LayoutType.ColumnMajor, 8], [LayoutType.RowMajor,    0]],
-    [[LayoutType.RowMajor,    8], [LayoutType.RowMajor,    8], [LayoutType.RowMajor,    0]],
+    # [[LayoutType.RowMajor,    8], [LayoutType.RowMajor,    8], [LayoutType.RowMajor,    0]],
   ]
 
   min_cc = 100
@@ -7102,7 +7102,14 @@ def GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
       [256, 256, 16],
       DataType.bf16, DataType.bf16, DataType.f32,
       OpcodeClass.TensorOp,
-      MathOperation.multiply_add)]
+      MathOperation.multiply_add),
+
+    MathInstruction(
+      [256, 256, 32],
+      DataType.f16, DataType.f16, DataType.f32,
+      OpcodeClass.TensorOp,
+      MathOperation.multiply_add)
+    ]
 
   cluster_shapes_2sm = [[2,1,1], [2,2,1], [2,4,1], [4,1,1], [4,2,1], [4,4,1]
                         , DynamicClusterShape
@@ -7114,8 +7121,16 @@ def GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
                          ]
 
   for math_inst in math_instructions_2sm:
+    if math_inst.instruction_shape[0] != 256 or math_inst.instruction_shape[1] != 256:
+      continue
+    if math_inst.element_a != DataType.f16 or math_inst.element_b != DataType.f16 or math_inst.element_accumulator != DataType.f32:
+      continue
+
     tile_descriptions = []
     for cluster_shape in cluster_shapes_2sm:
+      if cluster_shape not in [[2,1,1], [2,2,1]]:
+        continue
+
       multiplier_2sm = (1, 1, 1) if cluster_shape == DynamicClusterShape else (cluster_shape[0] // 2, cluster_shape[1], cluster_shape[2])
       tile_descriptions.append(
         TileDescription([
@@ -7154,21 +7169,21 @@ def GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
       epi_schedule = EpilogueScheduleType.ScheduleAuto
     kernel_schedule = KernelScheduleType.TmaWarpSpecialized2SmSm100 if not grouped else KernelScheduleType.PtrArrayTmaWarpSpecialized2SmSm100
 
-    CreateGemmUniversal3xOperator(manifest, layouts, tile_descriptions, data_types,
-      [[kernel_schedule, epi_schedule]], tile_schedulers=tile_schedulers, gemm_kind=gemm_kind)
+    # CreateGemmUniversal3xOperator(manifest, layouts, tile_descriptions, data_types,
+    #   [[kernel_schedule, epi_schedule]], tile_schedulers=tile_schedulers, gemm_kind=gemm_kind)
 
     # for mixed precision kernels, also generate kernels that write output matrix in the A/B format
     # Avoid emitting two kernels if the accumulator type does not differ from the input type (e.g. F16 accumulation)
     if math_inst.element_a != math_inst.element_accumulator:
       data_types_mixed = [
-        {
-          "a_type"   : math_inst.element_a,
-          "b_type"   : math_inst.element_b,
-          "c_type"   : math_inst.element_a,
-          "d_type"   : math_inst.element_a,
-          "acc_type" : math_inst.element_accumulator,
-          "epi_type" : math_inst.element_accumulator,
-        },
+        # {
+        #   "a_type"   : math_inst.element_a,
+        #   "b_type"   : math_inst.element_b,
+        #   "c_type"   : math_inst.element_a,
+        #   "d_type"   : math_inst.element_a,
+        #   "acc_type" : math_inst.element_accumulator,
+        #   "epi_type" : math_inst.element_accumulator,
+        # },
         {
           "a_type"   : math_inst.element_a,
           "b_type"   : math_inst.element_b,
@@ -10792,49 +10807,49 @@ def GenerateSM100(manifest, cuda_version):
 
   GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version)
 
-  GenerateSM100_TensorOp_32b_UMMA_gemm(manifest, cuda_version)
-  GenerateSM100_TensorOp_32b_UMMA_gemm_stream_k(manifest, cuda_version) 
+  # GenerateSM100_TensorOp_32b_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_TensorOp_32b_UMMA_gemm_stream_k(manifest, cuda_version) 
 
-  GenerateSM100_TensorOp_16b_UMMA_gemm_stream_k(manifest, cuda_version)
+  # GenerateSM100_TensorOp_16b_UMMA_gemm_stream_k(manifest, cuda_version)
 
-  if '100f' not in architectures and '101f' not in architectures:
-    GenerateSM100_TensorOp_int8_UMMA_gemm(manifest, cuda_version)
+  # if '100f' not in architectures and '101f' not in architectures:
+  #   GenerateSM100_TensorOp_int8_UMMA_gemm(manifest, cuda_version)
 
-  GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version)
   # grouped GEMM
-  GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
-  GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
+  # GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
+  # GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
 
-  GenerateSM100_TensorOp_fp8_UMMA_gemm_stream_k(manifest, cuda_version)
+  # GenerateSM100_TensorOp_fp8_UMMA_gemm_stream_k(manifest, cuda_version)
 
   # StreamK is included in regular generation
-  GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm(manifest, cuda_version)
 
   # Blockwise kernels
-  GenerateSM100_TensorOp_fp8_UMMA_gemm_with_blockwise(manifest, cuda_version)
-  GenerateSM100_TensorOp_fp8_UMMA_gemm_with_blockwise(manifest, cuda_version, gemm_kind=GemmKind.GroupedBlockwiseUniversal3x)
+  # GenerateSM100_TensorOp_fp8_UMMA_gemm_with_blockwise(manifest, cuda_version)
+  # GenerateSM100_TensorOp_fp8_UMMA_gemm_with_blockwise(manifest, cuda_version, gemm_kind=GemmKind.GroupedBlockwiseUniversal3x)
 
   #
   # Sparse Gemm
   #
-  GenerateSM100_SparseTensorOp_32b_UMMA_gemm(manifest, cuda_version)
-  GenerateSM100_SparseTensorOp_16b_UMMA_gemm(manifest, cuda_version)
-  if '100f' not in architectures and '101f' not in architectures:
-    GenerateSM100_SparseTensorOp_int8_UMMA_gemm(manifest, cuda_version)
-  GenerateSM100_SparseTensorOp_fp8_UMMA_gemm(manifest, cuda_version)
-  GenerateSM100_SparseTensorOp_mixed_8bits_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_SparseTensorOp_32b_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_SparseTensorOp_16b_UMMA_gemm(manifest, cuda_version)
+  # if '100f' not in architectures and '101f' not in architectures:
+  #   GenerateSM100_SparseTensorOp_int8_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_SparseTensorOp_fp8_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_SparseTensorOp_mixed_8bits_UMMA_gemm(manifest, cuda_version)
 
   #
   # Block Scaled Gemm
   #
-  GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cuda_version)
-  GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version)
-  GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version,  gemm_kind=GemmKind.GroupedBlockScaledUniversal3x)
+  # GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cuda_version)
+  # GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version)
+  # GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version,  gemm_kind=GemmKind.GroupedBlockScaledUniversal3x)
   #
   # Conv
   #
-  GenerateSM100_TensorOp_16b_UMMA_conv3x(manifest, cuda_version)
-  GenerateSM100_TensorOp_fp8_UMMA_conv3x(manifest, cuda_version)
+  # GenerateSM100_TensorOp_16b_UMMA_conv3x(manifest, cuda_version)
+  # GenerateSM100_TensorOp_fp8_UMMA_conv3x(manifest, cuda_version)
 
 
 def GenerateSM120(manifest, cuda_version):
@@ -11320,19 +11335,19 @@ if __name__ == "__main__":
 
   archs = args.architectures.split(';')
 
-  GenerateSM50(manifest, args.cuda_version)
-  GenerateSM60(manifest, args.cuda_version)
-  GenerateSM61(manifest, args.cuda_version)
-  GenerateSM70(manifest, args.cuda_version)
-  GenerateSM75(manifest, args.cuda_version)
-  GenerateSM80(manifest, args.cuda_version)
-  GenerateSM89(manifest, args.cuda_version)
-  GenerateSM90(manifest, args.cuda_version)
+  # GenerateSM50(manifest, args.cuda_version)
+  # GenerateSM60(manifest, args.cuda_version)
+  # GenerateSM61(manifest, args.cuda_version)
+  # GenerateSM70(manifest, args.cuda_version)
+  # GenerateSM75(manifest, args.cuda_version)
+  # GenerateSM80(manifest, args.cuda_version)
+  # GenerateSM89(manifest, args.cuda_version)
+  # GenerateSM90(manifest, args.cuda_version)
    
   blackwell_enabled_arch = any(arch in ["100a", "100f", "101a", "101f", "120a", "120f"] for arch in archs)
   if blackwell_enabled_arch:
     GenerateSM100(manifest, args.cuda_version)
-    GenerateSM120(manifest, args.cuda_version)
+    # GenerateSM120(manifest, args.cuda_version)
   
 
   if 'library' in args.generator_target.split(','):
