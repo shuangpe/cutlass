@@ -7121,8 +7121,6 @@ def GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
                          ]
 
   for math_inst in math_instructions_2sm:
-    if math_inst.instruction_shape[0] != 256 or math_inst.instruction_shape[1] != 256:
-      continue
     if math_inst.element_a != DataType.f16 or math_inst.element_b != DataType.f16 or math_inst.element_accumulator != DataType.f32:
       continue
 
@@ -7505,8 +7503,6 @@ def GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
                          ]                   
 
   for math_inst in math_instructions_2sm:
-    if math_inst.instruction_shape[1] != 256:
-      continue
     if not (math_inst.element_a == DataType.e4m3 and math_inst.element_b == DataType.e4m3):
       continue
 
@@ -8636,9 +8632,9 @@ def GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_versio
     ]
 
   for math_inst in math_instructions_2sm:
-    if math_inst.instruction_shape[0] != 256 or math_inst.instruction_shape[1] != 256:
-      continue
-    if math_inst.element_scale_factor != DataType.ue8m0:
+    # if math_inst.instruction_shape[0] != 256 or math_inst.instruction_shape[1] != 256:
+    #   continue
+    if math_inst.element_scale_factor != DataType.ue4m3:
       continue
     tile_descriptions = []
     for cluster_shape in cluster_shapes_2sm:
@@ -8731,6 +8727,8 @@ def GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_versio
 
     for layout in layouts:
       for data_type in data_types:
+        if ( data_type["a_type"] != DataType.e2m1 or data_type["b_type"] != DataType.e2m1):
+          continue
         if ( data_type["c_type"] != DataType.void or data_type["d_type"] != DataType.e2m1):
           continue
         if data_type["sfd_type"]["type"] != DataType.void and (data_type["d_type"] == DataType.e2m1):
