@@ -12,7 +12,7 @@ def parse_args():
     parser.add_argument('--k', type=int, default=4096, help='Sequence length K parameter')
     parser.add_argument('--h', type=int, default=16, help='Number of heads parameter')
     parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID to use for testing')
-    parser.add_argument('--commented', action='store_true', help='Include commented test options')
+    parser.add_argument('--commented', action='store_true', default=True, help='Include commented test options (default: True)')
     parser.add_argument('--out_dir', type=str, default='', help='Output directory for generated scripts')
     parser.add_argument('--exec_dir', type=str, default='/workspace/cutlass/build/examples',
                         help='Directory containing executable files')
@@ -121,6 +121,10 @@ def replace_params(param_str, user_params):
 
         result.append(param)
 
+    # Add common parameters that should always be included
+    result.append("--verbose")
+    result.append("--iterations=100")
+
     return ' '.join(result)
 
 def group_tests_by_executable(targets, include_commented, user_params):
@@ -147,6 +151,10 @@ def generate_executable_script(out_dir, freq, executable, tests, gpu_id, exec_di
     """Generate a shell script for a specific executable at a specific frequency"""
     script_filename = os.path.join(out_dir, "scripts", f"{executable}_{freq}mhz.sh")
 
+    # Get current date for logs directory
+    current_date = datetime.datetime.now().strftime("%Y%m%d")
+    logs_dir_name = f"{current_date}_sm100_fmha_logs"
+
     script_lines = [
         "#!/bin/bash",
         "",
@@ -160,33 +168,15 @@ def generate_executable_script(out_dir, freq, executable, tests, gpu_id, exec_di
         f"EXEC_DIR=\"{exec_dir}\"",
         "SCRIPT_DIR=$(dirname \"$(readlink -f \"$0\")\")",
         "BASE_DIR=$(dirname \"$SCRIPT_DIR\")",
-        "TIMESTAMP=$(date +\"%Y%m%d_%H%M%S\")",
-        "RESULTS_DIR=\"$BASE_DIR/results_${LOCK_FREQ}mhz\"",
-        "LOGS_DIR=\"$BASE_DIR/logs_${LOCK_FREQ}mhz\"",
+        f"LOGS_DIR=\"$BASE_DIR/{logs_dir_name}\"",
         "",
-        "# Parse command line arguments",
-        "SAVE_TO_FILE=0",
-        "while getopts \"s\" opt; do",
-        "    case ${opt} in",
-        "        s )",
-        "            SAVE_TO_FILE=1",
-        "            ;;",
-        "        \\? )",
-        "            echo \"Invalid option: $OPTARG\"",
-        "            exit 1",
-        "            ;;",
-        "    esac",
-        "done",
-        "",
-        "# Create directories",
-        "mkdir -p \"$RESULTS_DIR\"",
+        "# Create logs directory",
         "mkdir -p \"$LOGS_DIR\"",
         "",
         "# Start time",
         "START_TIME=$(date +%s)",
         "echo \"Starting tests for $EXECUTABLE at $(date)\"",
         "echo \"GPU ID: $GPU_ID, Frequency: $LOCK_FREQ MHz\"",
-        "echo \"Results directory: $RESULTS_DIR\"",
         "echo \"Logs directory: $LOGS_DIR\"",
         "echo \"Executable directory: $EXEC_DIR\"",
         "echo",
@@ -209,30 +199,30 @@ def generate_executable_script(out_dir, freq, executable, tests, gpu_id, exec_di
 
     # Generate test functions for each test configuration
     for option_name, params in tests:
-        script_lines.extend([
-            f"# Test $EXECUTABLE with {option_name}",
-            f"echo \"Running: $EXECUTABLE with {option_name}\"",
-            f"echo \"Parameters: {params}\"",
-            f"OUTPUT_FILE=\"$RESULTS_DIR/${{EXECUTABLE}}_{option_name}.log\"",
-            f"PERF_FILE=\"$RESULTS_DIR/${{EXECUTABLE}}_{option_name}.csv\"",
-            f"LOG_FILE=\"$LOGS_DIR/${{TIMESTAMP}}_gpu${{GPU_ID}}_${{LOCK_FREQ}}mhz_${{EXECUTABLE}}_{option_name}.log\"",
-            "",
-            f"if [ $SAVE_TO_FILE -eq 1 ]; then",
-            f"    \"$EXEC_DIR/$EXECUTABLE\" {params} --perf-output=$PERF_FILE > \"$LOG_FILE\" 2>&1",
-            f"    echo \"Results saved to $OUTPUT_FILE\"",
-            f"    echo \"Performance data saved to $PERF_FILE\"",
-            f"    echo \"Full log saved to $LOG_FILE\"",
-            f"else",
-            f"    echo \"======== Test Output Begin ========\"",
-            f"    \"$EXEC_DIR/$EXECUTABLE\" {params} --perf-output=$PERF_FILE | tee \"$LOG_FILE\"",
-            f"    echo \"======== Test Output End ========\"",
-            f"    echo \"Results saved to $OUTPUT_FILE\"",
-            f"    echo \"Performance data saved to $PERF_FILE\"",
-            f"    echo \"Full log saved to $LOG_FILE\"",
-            f"fi",
-            f"echo",
-            "",
-        ])
+        # For each test configuration, generate variations with different cache options
+        cache_options = [
+            "",                              # No cache options
+            "--clear-cache",                 # Only clear-cache
+            "--cache-only",                  # Only cache-only
+            "--clear-cache --cache-only"     # Both options
+        ]
+
+        for cache_params in cache_options:
+            # Skip cache-only option for tests that already have it
+            if "cache-only" in params and "--cache-only" in cache_params:
+                continue
+
+            full_params = f"{params} {cache_params}".strip()
+
+            script_lines.extend([
+                f"# Test $EXECUTABLE with {option_name}",
+                f"echo \"Running: $EXECUTABLE with {option_name}\"",
+                f"echo \"Parameters: {full_params}\"",
+                f"echo \"[{option_name}/${{LOCK_FREQ}}MHz] $EXECUTABLE {full_params}\"",
+                f"\"$EXEC_DIR/$EXECUTABLE\" {full_params}",
+                f"echo",
+                "",
+            ])
 
     # Reset frequency and add footer
     script_lines.extend([
@@ -272,6 +262,10 @@ def generate_freq_main_script(out_dir, freq, executable_scripts, gpu_id, exec_di
     """Generate a main script for a specific frequency"""
     script_filename = os.path.join(out_dir, "scripts", f"run_{freq}mhz.sh")
 
+    # Get current date for logs directory
+    current_date = datetime.datetime.now().strftime("%Y%m%d")
+    logs_dir_name = f"{current_date}_sm100_fmha_logs"
+
     script_lines = [
         "#!/bin/bash",
         "",
@@ -284,6 +278,10 @@ def generate_freq_main_script(out_dir, freq, executable_scripts, gpu_id, exec_di
         f"EXEC_DIR=\"{exec_dir}\"",
         "SCRIPT_DIR=$(dirname \"$(readlink -f \"$0\")\")",
         "BASE_DIR=$(dirname \"$SCRIPT_DIR\")",
+        f"LOGS_DIR=\"$BASE_DIR/{logs_dir_name}\"",
+        "",
+        "# Create logs directory",
+        "mkdir -p \"$LOGS_DIR\"",
         "",
         "# Start time",
         "START_TIME=$(date +%s)",
@@ -294,16 +292,21 @@ def generate_freq_main_script(out_dir, freq, executable_scripts, gpu_id, exec_di
         "",
     ]
 
-    # Add calls to each executable script with the save_to_file option
+    # Add calls to each executable script with output redirection to log file
     for script_path in executable_scripts:
         script_name = os.path.basename(script_path)
         executable_name = script_name.replace(f"_{freq}mhz.sh", "")
+        log_file = f"$LOGS_DIR/{executable_name}_{freq}mhz.log"
+        
         script_lines.extend([
+            f"echo \"=========================================================================\"",
             f"echo \"Running tests for {executable_name} at {freq}MHz...\"",
-            f"\"$SCRIPT_DIR/{script_name}\" -s",  # Enable save_to_file mode
-            "if [ $? -ne 0 ]; then",
-            f"    echo \"Warning: Tests for {executable_name} failed\"",
-            "fi",
+            f"echo \"=========================================================================\"",
+            f"echo \"Log file: {log_file}\"",
+            f"# Initialize log file",
+            f"> \"{log_file}\"",
+            f"# Run the script and redirect output to log file",
+            f"\"$SCRIPT_DIR/{script_name}\" > \"{log_file}\" 2>&1",  # Add redirection to log file
             "echo",
             "",
         ])
@@ -357,7 +360,9 @@ def generate_main_script(out_dir, freq_scripts, exec_dir):
         script_name = os.path.basename(freq_script)
         freq = script_name.replace("run_", "").replace("mhz.sh", "")
         script_lines.extend([
+            f"echo \"=========================================================================\"",
             f"echo \"Running tests at {freq}MHz...\"",
+            f"echo \"=========================================================================\"",
             f"\"$SCRIPT_DIR/scripts/{script_name}\"",
             "if [ $? -ne 0 ]; then",
             f"    echo \"Warning: Tests at {freq}MHz failed\"",
@@ -396,9 +401,8 @@ def main():
 
     # Make sure output directory is absolute
     if not os.path.isabs(args.out_dir):
-        # Get the directory where this script is located
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        args.out_dir = os.path.join(script_dir, args.out_dir)
+        # Use current working directory, not script directory
+        args.out_dir = os.path.join(os.getcwd(), args.out_dir)
 
     # Create output directory
     os.makedirs(args.out_dir, exist_ok=True)
