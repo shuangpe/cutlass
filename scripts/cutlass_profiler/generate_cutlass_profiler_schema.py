@@ -25,10 +25,11 @@ def parse_args():
 def validate_gpu_id(gpu_id):
     import subprocess
     try:
+        # 使用 nvidia-smi -L，每行代表一张 GPU
         result = subprocess.run([
-            "nvidia-smi", "--query-gpu=count", "--format=csv,noheader,nounits"
+            "nvidia-smi", "-L"
         ], capture_output=True, text=True, check=True)
-        gpu_count = int(result.stdout.strip())
+        gpu_count = len([line for line in result.stdout.strip().split('\n') if line.strip()])
         if gpu_id < 0 or gpu_id >= gpu_count:
             print(f"Error: Invalid GPU ID. System has {gpu_count} GPU(s), IDs range from 0 to {gpu_count-1}")
             return False
@@ -142,6 +143,7 @@ def main():
     main_script_lines = [
         "#!/bin/bash",
         f"# Script to reproduce all profiling runs from {current_date} for GPU ID {gpu_id}",
+        f"mkdir -p \"{report_dir}/logs\"",
         "overall_start_time=$(date +%s)",
         f"echo \"Starting profiling runs for GPU ID: {gpu_id} at $(date)\"",
         ""
