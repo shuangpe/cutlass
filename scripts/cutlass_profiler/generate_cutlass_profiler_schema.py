@@ -86,7 +86,7 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
         f"/workspace/cutlass/build/tools/profiler/cutlass_profiler \\",
         "  --operation=$operation \\",
         "  --profiling-iterations=100 --warmup-iterations=10 \\",
-        "  --m=8192 --n=8192 --k=256,512,1024,2048,4096,8192 \\",
+        "  --m=16384 --n=16384 --k=256,512,1024,2048,4096,8192,16384 \\",
         "  --providers=cutlass --dist=uniform,min:-4,max:4 \\",
         f"  --output=\"{csv_dir}/profile-${{operation}}-${{max_freq}}mhz-gpu${{gpu_id}}.csv\"",
         "",
