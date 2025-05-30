@@ -8400,7 +8400,7 @@ def GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_versio
   ]
 
   instruction_sizes_2sm = [
-    [256, 64, 64], 
+    # [256, 64, 64], 
     [256, 128, 64], 
     [256, 192, 64], [256, 256, 64]
   ]
@@ -8667,7 +8667,7 @@ def GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_versio
         "acc_type" : math_inst.element_accumulator,
         "epi_type" : epi_type,
         "sf_type"  : math_inst.element_scale_factor,
-        "sfd_type" : {"type": DataType.ue8m0, "vector_size": 32, "layout" : LayoutType.RowMajor}
+        "sfd_type" : {"type": DataType.ue4m3, "vector_size": 16, "layout" : LayoutType.RowMajor}
       },
       {
         "a_type"   : math_inst.element_a,
