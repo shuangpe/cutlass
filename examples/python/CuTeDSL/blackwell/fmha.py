@@ -2725,6 +2725,11 @@ def run_fmha_and_verify(
             current_stream,
         )
 
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    torch.cuda.synchronize()
+    start_event.record()
+
     # Execute kernel
     for _ in range(iterations):
         compiled_fmha(
@@ -2737,7 +2742,27 @@ def run_fmha_and_verify(
             current_stream,
         )
 
+    end_event.record()
     torch.cuda.synchronize()
+
+    runtime_ms = start_event.elapsed_time(end_event) / max(1, iterations)  # 单次平均时间
+
+    # FLOPs calculation
+    # batch, seq_q, num_heads, head_dim
+    b, s_q, h, d = q_shape
+    s_k = k_shape[1]
+    h_k = k_shape[2]
+    h_r = h // h_k
+    # Formular: batch * seq_q * seq_k * num_heads * head_dim * 4
+    print(f"[FMHA] b={b}, s_q={s_q}, s_k={s_k}, h={h}, d={d}, h_k={h_k}, h_r={h_r}")
+    flops = b * s_q * s_k * h * d * 4
+    print(f"[FMHA] flops(before mask)={flops}")
+    if has_casual_mask:
+        flops *= 0.5
+        print("[FMHA] Causal mask applied, flops halved.")
+    print(f"[FMHA] flops(final)={flops}")
+    tflops = flops * 1e-12 / (runtime_ms * 1e-3)
+    print(f"[FMHA] Average runtime: {runtime_ms:.4f} ms, TFLOPS: {tflops:.2f}")
 
     def run_torch_fmha(
         q, k, v, scale_softmax=1.0, scale_output=1.0, has_casual_mask=False
