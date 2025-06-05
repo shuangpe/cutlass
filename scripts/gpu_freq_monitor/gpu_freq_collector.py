@@ -77,10 +77,12 @@ class GpuClockMonitor:
             # Write header
             csv_writer.writerow(['timestamp', 'graphics_clock', 'memory_clock', 'sm_clock'])
 
-            # Write data rows
+            # Write data rows with timestamp format (HH:MM:SS.xx)
             for i in range(len(self.timestamps)):
+                # Format timestamp as hours:minutes:seconds with 2 decimal places
+                timestamp_str = self.timestamps[i].strftime('%H:%M:%S.%f')[:-4]
                 csv_writer.writerow([
-                    self.timestamps[i],
+                    timestamp_str,
                     self.graphics_clocks[i],
                     self.memory_clocks[i],
                     self.sm_clocks[i]
