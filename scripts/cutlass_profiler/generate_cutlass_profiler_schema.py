@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Python script to generate cutlass_profiler profiling shell scripts, refactored from run_profiler.sh
 """
@@ -9,7 +10,7 @@ import datetime
 
 # Default operations and frequency profiles
 default_operations = ["Gemm", "BlockScaledGemm"]
-default_freq_profiles = [(1500, 1500), (1300, 1300)]
+default_freq_profiles = [(1500, 1500), (1305, 1305), (1005, 1005)]
 
 
 def parse_args():
@@ -18,7 +19,7 @@ def parse_args():
     parser.add_argument("-d", "--dry_run", action="store_true", help="Dry run mode: only print commands")
     parser.add_argument("-o", "--out_dir", type=str, default=None, help="Output directory for generated scripts")
     parser.add_argument("--operations", nargs="*", default=None, help="Operations to test (default: Gemm BlockScaledGemm)")
-    parser.add_argument("--freqs", nargs="*", type=int, default=None, help="Frequency profiles, e.g. 1500 1300 (applies to both min/max)")
+    parser.add_argument("--freqs", nargs="*", type=int, default=None, help="Frequency profiles, e.g. 1500 1305 (applies to both min/max)")
     return parser.parse_args()
 
 
