@@ -25,7 +25,7 @@ def parse_args():
 def validate_gpu_id(gpu_id):
     import subprocess
     try:
-        # 使用 nvidia-smi -L，每行代表一张 GPU
+        # Use nvidia-smi -L, each line represents one GPU
         result = subprocess.run([
             "nvidia-smi", "-L"
         ], capture_output=True, text=True, check=True)
@@ -55,6 +55,18 @@ def append_lines_to_file(filepath, lines):
 
 def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, report_dir, csv_dir):
     """Generate a shell script for a specific freq/operation (no save_log_to_file, always print to console)"""
+    # Create directory for frequency monitoring data inside csv_dir
+    freq_logs_dir = os.path.join(csv_dir, "freq_logs")
+    ensure_dir(freq_logs_dir)
+
+    # Calculate GPU frequency monitoring script path based on current script path
+    current_script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_script_dir)
+    gpu_freq_collector_path = os.path.join(parent_dir, "gpu_freq_monitor", "gpu_freq_collector.py")
+
+    # Frequency monitoring file path
+    freq_log_filename = f"{freq_logs_dir}/gpu_freq-{operation.lower()}-{max_freq}mhz-gpu{gpu_id}.csv"
+
     lines = [
         "#!/bin/bash",
         f"# Command to reproduce profiling at {max_freq}MHz for GPU ID {gpu_id} with operation {operation}",
@@ -67,9 +79,17 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
         "ORIGINAL_CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}",
         "export CUDA_VISIBLE_DEVICES=$gpu_id",
         f"mkdir -p \"{report_dir}/logs\"",
+        f"mkdir -p \"{freq_logs_dir}\"",
         f"log_filename=\"{report_dir}/logs/profile-${{operation}}-${{max_freq}}mhz-gpu${{gpu_id}}.log\"",
+        f"freq_log_filename=\"{freq_log_filename}\"",
         "start_time=$(date +%s)",
         "echo \"Started at $(date)\"",
+        "",
+        "# Check dependencies",
+        "if ! pip3 show pynvml pandas > /dev/null 2>&1; then",
+        "  echo \"Installing required Python libraries...\"",
+        "  pip3 install pynvml pandas",
+        "fi",
         "",
         "# Set GPU frequency",
         "echo \"Setting GPU $gpu_id frequency range to $min_freq MHz ~ $max_freq MHz...\"",
@@ -82,6 +102,19 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
         "  exit 1",
         "fi",
         "",
+        "# Start GPU frequency monitoring",
+        "echo \"Starting GPU frequency monitoring...\"",
+        f"python3 {gpu_freq_collector_path} \\",
+        "  --gpu-id=$gpu_id \\",
+        "  --output=$freq_log_filename \\",
+        "  --interval=0.1 &",
+        "",
+        "MONITOR_PID=$!",
+        "echo \"GPU frequency monitoring started with PID: $MONITOR_PID\"",
+        "",
+        "# Wait a few seconds to ensure the monitoring script is running",
+        "sleep 2",
+        "",
         "# Run profiler",
         "echo \"Running profiler for operation $operation with GPU $gpu_id at frequency range $min_freq MHz ~ $max_freq MHz...\"",
         f"/workspace/cutlass/build/tools/profiler/cutlass_profiler \\",
@@ -90,6 +123,12 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
         "  --m=16384 --n=16384 --k=256,512,1024,2048,4096,8192,16384 \\",
         "  --providers=cutlass --dist=uniform,min:-5,max:5 \\",
         f"  --output=\"{csv_dir}/profile-${{operation}}-${{max_freq}}mhz-gpu${{gpu_id}}.csv\"",
+        "",
+        "# Stop GPU frequency monitoring",
+        "echo \"Stopping GPU frequency monitoring...\"",
+        "kill $MONITOR_PID",
+        "wait $MONITOR_PID 2>/dev/null || true",
+        "echo \"GPU frequency monitoring stopped. Frequency data saved to: $freq_log_filename\"",
         "",
         "# Reset GPU frequency",
         "echo \"Resetting GPU $gpu_id frequency to default...\"",
@@ -104,6 +143,7 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
         "duration=$((end_time - start_time))",
         "echo \"Finished at $(date)\"",
         "echo \"Total runtime: $((duration / 60)) minutes and $((duration % 60)) seconds\"",
+        "echo \"GPU frequency monitoring data saved to: $freq_log_filename\"",
         "if [ -z \"$ORIGINAL_CUDA_VISIBLE_DEVICES\" ]; then",
         "  unset CUDA_VISIBLE_DEVICES",
         "else",
@@ -137,6 +177,9 @@ def main():
     csv_dir = os.path.join(report_dir, csv_base)
     ensure_dir(scripts_dir)
     ensure_dir(csv_dir)
+    # Create directory for frequency monitoring data inside csv_dir
+    freq_logs_dir = os.path.join(csv_dir, "freq_logs")
+    ensure_dir(freq_logs_dir)
 
     # Main run script
     main_run_script = os.path.join(report_dir, "run.sh")
@@ -155,7 +198,7 @@ def main():
         for min_freq, max_freq in freq_profiles:
             freq_run_script = os.path.join(scripts_dir, f"profile_{operation_lower}_{max_freq}mhz_gpu{gpu_id}.sh")
             generate_freq_script(freq_run_script, gpu_id, min_freq, max_freq, operation, report_dir, csv_dir)
-            # 主脚本调用子脚本并重定向输出到log文件
+            # Main script calls subscripts and redirects output to log file
             main_script_lines.extend([
                 f"echo \"Running profile for {operation} at {max_freq}MHz...\"",
                 f'"{freq_run_script}" > "{report_dir}/logs/profile-{operation_lower}-{max_freq}mhz-gpu{gpu_id}.log" 2>&1',
