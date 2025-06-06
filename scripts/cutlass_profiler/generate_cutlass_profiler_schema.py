@@ -69,7 +69,6 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, ker
     min_freq_str = "oob" if min_freq == -1 else str(min_freq)
 
     script_base = os.path.splitext(os.path.basename(script_path))[0]
-    log_filename = os.path.join(report_dir, "logs", f"{script_base}.log")
     freq_log_filename = os.path.join(freq_logs_dir, f"{script_base}.csv")
 
     lines = [
@@ -86,7 +85,6 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, ker
         "export CUDA_VISIBLE_DEVICES=$gpu_id",
         f"mkdir -p \"{report_dir}/logs\"",
         f"mkdir -p \"{freq_logs_dir}\"",
-        f"log_filename=\"{log_filename}\"",
         f"freq_log_filename=\"{freq_log_filename}\"",
         "start_time=$(date +%s)",
         "echo \"Started at $(date '+%Y-%m-%d %H:%M:%S')\"",
@@ -252,9 +250,11 @@ def main():
                 freq_run_script = os.path.join(scripts_dir, f"profile_{precision_str}_{operation_lower}_{freq_str}mhz_gpu{gpu_id}.sh")
                 generate_freq_script(freq_run_script, gpu_id, min_freq, max_freq, operation, kernel_filters, report_dir, csv_dir)
                 # Main script calls subscripts and redirects output to log file
+                script_base = os.path.splitext(os.path.basename(freq_run_script))[0]
+                log_filename = os.path.join(report_dir, "logs", f"{script_base}.log")
                 main_script_lines.extend([
-                    f"echo \"Running profile for {operation} at {max_freq}MHz...\"",
-                    f'"{freq_run_script}" > "{report_dir}/logs/profile-{operation_lower}-{freq_str}mhz-gpu{gpu_id}.log" 2>&1',
+                    f"echo \"Running profile for {precision_str} {operation} at {max_freq}MHz...\"",
+                    f'"{freq_run_script}" > "{log_filename}" 2>&1',
                     ""
                 ])
 
