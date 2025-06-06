@@ -69,7 +69,8 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, ker
     min_freq_str = "oob" if min_freq == -1 else str(min_freq)
 
     script_base = os.path.splitext(os.path.basename(script_path))[0]
-    freq_log_filename = os.path.join(freq_logs_dir, f"{script_base}.csv")
+    perf_csv_filename = os.path.join(csv_dir, f"{script_base}.csv")
+    freq_log_filename = os.path.join(freq_logs_dir, f"freq_{script_base}.csv")
 
     lines = [
         "#!/bin/bash",
@@ -85,6 +86,7 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, ker
         "export CUDA_VISIBLE_DEVICES=$gpu_id",
         f"mkdir -p \"{report_dir}/logs\"",
         f"mkdir -p \"{freq_logs_dir}\"",
+        f"perf_csv_filename=\"{perf_csv_filename}\"",
         f"freq_log_filename=\"{freq_log_filename}\"",
         "start_time=$(date +%s)",
         "echo \"Started at $(date '+%Y-%m-%d %H:%M:%S')\"",
@@ -142,7 +144,7 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, ker
         "  --profiling-iterations=100 --warmup-iterations=10 \\",
         "  --m=16384 --n=16384 --k=256,512,1024,2048,4096,8192,16384 \\",
         "  --providers=cutlass --dist=uniform,min:-5,max:5 \\",
-        f"  --output=\"{csv_dir}/profile-${{operation}}-{freq_str}mhz-gpu${{gpu_id}}.csv\"",
+        f"  --output=$perf_csv_filename",
         "profiler_end_time=$(date +%s)",
         "profiler_end_formatted=$(date '+%Y-%m-%d %H:%M:%S')",
         "profiler_duration=$((profiler_end_time - profiler_start_time))",
@@ -237,16 +239,16 @@ def main():
     # Generate freq/operation scripts and add to main script
     for operation in operations:
         operation_lower = operation.lower()
-        for min_freq, max_freq in freq_profiles:
-            freq_str = "oob" if max_freq == -1 else str(max_freq)
-            kernel_filters = ["f16_f16_f32_void_f16", "e4m3_e4m3_f32_void_e4m3"] if operation_lower == "gemm" else ["ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1"]
-            for kernel_filter in kernel_filters:
-                precision_str = "fp8"
-                if kernel_filter == "ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1":
-                    precision_str = "nvfp4"
-                elif kernel_filter == "f16_f16_f32_void_f16":
-                    precision_str = "fp16"
+        kernel_filters = ["f16_f16_f32_void_f16", "e4m3_e4m3_f32_void_e4m3"] if operation_lower == "gemm" else ["ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1"]
+        for kernel_filter in kernel_filters:
+            precision_str = "fp8"
+            if kernel_filter == "ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1":
+                precision_str = "nvfp4"
+            elif kernel_filter == "f16_f16_f32_void_f16":
+                precision_str = "fp16"
 
+            for min_freq, max_freq in freq_profiles:
+                freq_str = "oob" if max_freq == -1 else str(max_freq)
                 freq_run_script = os.path.join(scripts_dir, f"profile_{precision_str}_{operation_lower}_{freq_str}mhz_gpu{gpu_id}.sh")
                 generate_freq_script(freq_run_script, gpu_id, min_freq, max_freq, operation, kernel_filter, report_dir, csv_dir)
                 # Main script calls subscripts and redirects output to log file
