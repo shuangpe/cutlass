@@ -53,7 +53,7 @@ def append_lines_to_file(filepath, lines):
         f.write('\n'.join(lines) + '\n')
 
 
-def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, kernel_filters, report_dir, csv_dir):
+def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, kernel_filter, report_dir, csv_dir):
     """Generate a shell script for a specific freq/operation (no save_log_to_file, always print to console)"""
     # Create directory for frequency monitoring data inside csv_dir
     freq_logs_dir = os.path.join(csv_dir, "freq_logs")
@@ -80,7 +80,7 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, ker
         f"min_freq={min_freq}",
         f"max_freq={max_freq}",
         f"operation=\"{operation}\"",
-        f"kernel_filters=\"{kernel_filters}\"",
+        f"kernel_filter=\"{kernel_filter}\"",
         "ORIGINAL_CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}",
         "export CUDA_VISIBLE_DEVICES=$gpu_id",
         f"mkdir -p \"{report_dir}/logs\"",
@@ -138,7 +138,7 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, ker
         "profiler_start_time=$(date +%s)",
         "profiler_start_formatted=$(date '+%Y-%m-%d %H:%M:%S')",
         f"/workspace/cutlass/build/tools/profiler/cutlass_profiler \\",
-        "  --operation=$operation --kernels=$kernel_filters \\",
+        "  --operation=$operation --kernels=$kernel_filter \\",
         "  --profiling-iterations=100 --warmup-iterations=10 \\",
         "  --m=16384 --n=16384 --k=256,512,1024,2048,4096,8192,16384 \\",
         "  --providers=cutlass --dist=uniform,min:-5,max:5 \\",
@@ -248,7 +248,7 @@ def main():
                     precision_str = "fp16"
 
                 freq_run_script = os.path.join(scripts_dir, f"profile_{precision_str}_{operation_lower}_{freq_str}mhz_gpu{gpu_id}.sh")
-                generate_freq_script(freq_run_script, gpu_id, min_freq, max_freq, operation, kernel_filters, report_dir, csv_dir)
+                generate_freq_script(freq_run_script, gpu_id, min_freq, max_freq, operation, kernel_filter, report_dir, csv_dir)
                 # Main script calls subscripts and redirects output to log file
                 script_base = os.path.splitext(os.path.basename(freq_run_script))[0]
                 log_filename = os.path.join(report_dir, "logs", f"{script_base}.log")
