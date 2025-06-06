@@ -10,8 +10,7 @@ import datetime
 
 # Default operations and frequency profiles
 default_operations = ["Gemm", "BlockScaledGemm"]
-default_freq_profiles = [(1500, 1500), (1305, 1305), (1005, 1005)]
-
+default_freq_profiles = [(1500, 1500), (1305, 1305), (1005, 1005), (-1, -1)]  # -1 means no frequency limit
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate cutlass_profiler profiling scripts")
@@ -54,7 +53,7 @@ def append_lines_to_file(filepath, lines):
         f.write('\n'.join(lines) + '\n')
 
 
-def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, report_dir, csv_dir):
+def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, kernel_filters, report_dir, csv_dir):
     """Generate a shell script for a specific freq/operation (no save_log_to_file, always print to console)"""
     # Create directory for frequency monitoring data inside csv_dir
     freq_logs_dir = os.path.join(csv_dir, "freq_logs")
@@ -65,23 +64,29 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
     parent_dir = os.path.dirname(current_script_dir)
     gpu_freq_collector_path = os.path.join(parent_dir, "gpu_freq_monitor", "gpu_freq_collector.py")
 
-    # Frequency monitoring file path
-    freq_log_filename = f"{freq_logs_dir}/gpu_freq-{operation.lower()}-{max_freq}mhz-gpu{gpu_id}.csv"
+    # Frequency string for filenames/logs
+    freq_str = "oob" if max_freq == -1 else str(max_freq)
+    min_freq_str = "oob" if min_freq == -1 else str(min_freq)
+
+    script_base = os.path.splitext(os.path.basename(script_path))[0]
+    log_filename = os.path.join(report_dir, "logs", f"{script_base}.log")
+    freq_log_filename = os.path.join(freq_logs_dir, f"{script_base}.csv")
 
     lines = [
         "#!/bin/bash",
-        f"# Command to reproduce profiling at {max_freq}MHz for GPU ID {gpu_id} with operation {operation}",
+        f"# Command to reproduce profiling at {freq_str}MHz for GPU ID {gpu_id} with operation {operation}",
         "",
         "set -e",
         f"gpu_id={gpu_id}",
         f"min_freq={min_freq}",
         f"max_freq={max_freq}",
         f"operation=\"{operation}\"",
+        f"kernel_filters=\"{kernel_filters}\"",
         "ORIGINAL_CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}",
         "export CUDA_VISIBLE_DEVICES=$gpu_id",
         f"mkdir -p \"{report_dir}/logs\"",
         f"mkdir -p \"{freq_logs_dir}\"",
-        f"log_filename=\"{report_dir}/logs/profile-${{operation}}-${{max_freq}}mhz-gpu${{gpu_id}}.log\"",
+        f"log_filename=\"{log_filename}\"",
         f"freq_log_filename=\"{freq_log_filename}\"",
         "start_time=$(date +%s)",
         "echo \"Started at $(date '+%Y-%m-%d %H:%M:%S')\"",
@@ -91,18 +96,32 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
         "  echo \"Installing required Python libraries...\"",
         "  pip3 install pynvml pandas",
         "fi",
-        "",
-        "# Set GPU frequency",
-        "echo \"Setting GPU $gpu_id frequency range to $min_freq MHz ~ $max_freq MHz...\"",
-        "if nvidia-smi --id=\"$gpu_id\" --lock-gpu-clocks=\"$min_freq\",\"$max_freq\"; then",
-        "  echo \"GPU frequency setting successful\"",
-        "  echo \"Current GPU settings:\"",
-        "  nvidia-smi --id=\"$gpu_id\" --query-gpu=name,clocks.gr,clocks.max.gr --format=csv",
-        "else",
-        "  echo \"GPU frequency setting failed\"",
-        "  exit 1",
-        "fi",
-        "",
+        ""
+    ]
+
+    # Set GPU frequency only if not -1
+    if max_freq != -1 and min_freq != -1:
+        lines += [
+            "# Set GPU frequency",
+            "echo \"Setting GPU $gpu_id frequency range to $min_freq MHz ~ $max_freq MHz...\"",
+            "if nvidia-smi --id=\"$gpu_id\" --lock-gpu-clocks=\"$min_freq\",\"$max_freq\"; then",
+            "  echo \"GPU frequency setting successful\"",
+            "  echo \"Current GPU settings:\"",
+            "  nvidia-smi --id=\"$gpu_id\" --query-gpu=name,clocks.gr,clocks.max.gr --format=csv",
+            "else",
+            "  echo \"GPU frequency setting failed\"",
+            "  exit 1",
+            "fi",
+            ""
+        ]
+    else:
+        lines += [
+            "# No frequency lock applied (min_freq or max_freq is -1, treated as out-of-band)",
+            "echo \"No GPU frequency lock applied for GPU $gpu_id (min_freq or max_freq is -1)\"",
+            ""
+        ]
+
+    lines += [
         "# Start GPU frequency monitoring",
         "echo \"Starting GPU frequency monitoring...\"",
         f"python3 {gpu_freq_collector_path} \\",
@@ -117,15 +136,15 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
         "sleep 2",
         "",
         "# Run profiler",
-        "echo \"Running profiler for operation $operation with GPU $gpu_id at frequency range $min_freq MHz ~ $max_freq MHz...\"",
+        f"echo \"Running profiler for operation $operation with GPU $gpu_id at frequency range {min_freq_str} MHz ~ {freq_str} MHz...\"",
         "profiler_start_time=$(date +%s)",
         "profiler_start_formatted=$(date '+%Y-%m-%d %H:%M:%S')",
         f"/workspace/cutlass/build/tools/profiler/cutlass_profiler \\",
-        "  --operation=$operation \\",
+        "  --operation=$operation --kernels=$kernel_filters \\",
         "  --profiling-iterations=100 --warmup-iterations=10 \\",
         "  --m=16384 --n=16384 --k=256,512,1024,2048,4096,8192,16384 \\",
         "  --providers=cutlass --dist=uniform,min:-5,max:5 \\",
-        f"  --output=\"{csv_dir}/profile-${{operation}}-${{max_freq}}mhz-gpu${{gpu_id}}.csv\"",
+        f"  --output=\"{csv_dir}/profile-${{operation}}-{freq_str}mhz-gpu${{gpu_id}}.csv\"",
         "profiler_end_time=$(date +%s)",
         "profiler_end_formatted=$(date '+%Y-%m-%d %H:%M:%S')",
         "profiler_duration=$((profiler_end_time - profiler_start_time))",
@@ -141,16 +160,29 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, rep
         "kill $MONITOR_PID",
         "wait $MONITOR_PID 2>/dev/null || true",
         "echo \"GPU frequency monitoring stopped. Frequency data saved to: $freq_log_filename\"",
-        "",
-        "# Reset GPU frequency",
-        "echo \"Resetting GPU $gpu_id frequency to default...\"",
-        "if nvidia-smi --id=\"$gpu_id\" --reset-gpu-clocks; then",
-        "  echo \"GPU frequency reset successful\"",
-        "  echo \"Current GPU settings:\"",
-        "  nvidia-smi --id=\"$gpu_id\" --query-gpu=name,clocks.gr,clocks.max.gr --format=csv",
-        "else",
-        "  echo \"GPU frequency reset failed\"",
-        "fi",
+        ""
+    ]
+
+    # Reset GPU frequency only if not -1
+    if max_freq != -1 and min_freq != -1:
+        lines += [
+            "# Reset GPU frequency",
+            "echo \"Resetting GPU $gpu_id frequency to default...\"",
+            "if nvidia-smi --id=\"$gpu_id\" --reset-gpu-clocks; then",
+            "  echo \"GPU frequency reset successful\"",
+            "  echo \"Current GPU settings:\"",
+            "  nvidia-smi --id=\"$gpu_id\" --query-gpu=name,clocks.gr,clocks.max.gr --format=csv",
+            "else",
+            "  echo \"GPU frequency reset failed\"",
+            "fi",
+        ]
+    else:
+        lines += [
+            "# No GPU frequency reset needed (min_freq or max_freq is -1)",
+            "echo \"No GPU frequency reset needed for GPU $gpu_id (min_freq or max_freq is -1)\"",
+        ]
+
+    lines += [
         "end_time=$(date +%s)",
         "duration=$((end_time - start_time))",
         "echo \"Finished at $(date '+%Y-%m-%d %H:%M:%S')\"",
@@ -208,14 +240,23 @@ def main():
     for operation in operations:
         operation_lower = operation.lower()
         for min_freq, max_freq in freq_profiles:
-            freq_run_script = os.path.join(scripts_dir, f"profile_{operation_lower}_{max_freq}mhz_gpu{gpu_id}.sh")
-            generate_freq_script(freq_run_script, gpu_id, min_freq, max_freq, operation, report_dir, csv_dir)
-            # Main script calls subscripts and redirects output to log file
-            main_script_lines.extend([
-                f"echo \"Running profile for {operation} at {max_freq}MHz...\"",
-                f'"{freq_run_script}" > "{report_dir}/logs/profile-{operation_lower}-{max_freq}mhz-gpu{gpu_id}.log" 2>&1',
-                ""
-            ])
+            freq_str = "oob" if max_freq == -1 else str(max_freq)
+            kernel_filters = ["f16_f16_f32_void_f16", "e4m3_e4m3_f32_void_e4m3"] if operation_lower == "gemm" else ["ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1"]
+            for kernel_filter in kernel_filters:
+                precision_str = "fp8"
+                if kernel_filter == "ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1":
+                    precision_str = "nvfp4"
+                elif kernel_filter == "f16_f16_f32_void_f16":
+                    precision_str = "fp16"
+
+                freq_run_script = os.path.join(scripts_dir, f"profile_{precision_str}_{operation_lower}_{freq_str}mhz_gpu{gpu_id}.sh")
+                generate_freq_script(freq_run_script, gpu_id, min_freq, max_freq, operation, kernel_filters, report_dir, csv_dir)
+                # Main script calls subscripts and redirects output to log file
+                main_script_lines.extend([
+                    f"echo \"Running profile for {operation} at {max_freq}MHz...\"",
+                    f'"{freq_run_script}" > "{report_dir}/logs/profile-{operation_lower}-{freq_str}mhz-gpu{gpu_id}.log" 2>&1',
+                    ""
+                ])
 
     main_script_lines.append("echo \"All profiles completed.\"")
     main_script_lines.extend([
