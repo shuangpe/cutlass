@@ -35,7 +35,7 @@ set(TEST_SWIZZLE_5_UNEVEN --swizzle=5 --m=4096 --n=16384)
 
 if(NOT CUTLASS_NVCC_ARCHS STREQUAL "100")
 cutlass_example_add_executable(
-  70_blackwell_fp16_gemm_256x256x128_2x2x1
+  70_blackwell_fp16_gemm_256x256x128_2x1x1
   70_blackwell_fp16_gemm.cu
   TEST_COMMAND_OPTIONS
   TEST_SWIZZLE_1
@@ -43,7 +43,7 @@ cutlass_example_add_executable(
   TEST_SWIZZLE_5
   TEST_SWIZZLE_5_UNEVEN
 )
-target_compile_definitions(70_blackwell_fp16_gemm_256x256x128_2x2x1 PRIVATE MS_M=_256 MS_K=_128 CS_M=_2 CS_N=_2)
+target_compile_definitions(70_blackwell_fp16_gemm_256x256x128_2x1x1 PRIVATE MS_M=_256 MS_K=_128 CS_M=_2 CS_N=_1)
 
 cutlass_example_add_executable(
   70_blackwell_fp16_gemm_128x256x128_1x1x1

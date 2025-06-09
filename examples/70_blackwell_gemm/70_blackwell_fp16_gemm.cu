@@ -101,8 +101,8 @@ using         LayoutB     = cutlass::layout::ColumnMajor;                   // L
 constexpr int AlignmentB  = 128 / cutlass::sizeof_bits<ElementB>::value;    // Memory access granularity/alignment of B matrix in units of elements (up to 16 bytes)
 
 // C/D matrix configuration
-using         ElementC    = float;                                          // Element type for C and D matrix operands
-using         LayoutC     = cutlass::layout::ColumnMajor;                   // Layout type for C and D matrix operands
+using         ElementC    = half_t;                                          // Element type for C and D matrix operands
+using         LayoutC     = cutlass::layout::RowMajor;                   // Layout type for C and D matrix operands
 constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<ElementC>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
 
 // Kernel functional config
@@ -122,7 +122,7 @@ using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBui
     MmaTileShape_MNK, ClusterShape_MNK,
     cutlass::epilogue::collective::EpilogueTileAuto,
     ElementAccumulator, ElementAccumulator,
-    ElementC, LayoutC, AlignmentC,
+    void, LayoutC, AlignmentC,
     ElementC, LayoutC, AlignmentC,
     cutlass::epilogue::collective::EpilogueScheduleAuto
   >::CollectiveOp;
@@ -198,7 +198,7 @@ struct Options {
 
   Options():
     help(false),
-    m(8192), n(8192), k(8192),
+    m(16384), n(16384), k(16384),
     alpha(1.f), beta(0.f),
     iterations(10),
     swizzle(0)
@@ -299,6 +299,9 @@ bool initialize_block(
     scope_max = Element(8);
     scope_min = Element(-8);
   }
+
+  scope_max = Element(5);
+  scope_min = Element(-5);
 
   cutlass::reference::device::BlockFillRandomUniform(
     block.get(), block.size(), seed, scope_max, scope_min, 0);
