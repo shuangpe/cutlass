@@ -8120,7 +8120,7 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
 
   layouts = [
     [[LayoutType.RowMajor,    128], [LayoutType.ColumnMajor, 128], [LayoutType.RowMajor,    0]],
-    [[LayoutType.ColumnMajor, 128], [LayoutType.RowMajor,    128], [LayoutType.RowMajor,    0]],
+    # [[LayoutType.ColumnMajor, 128], [LayoutType.RowMajor,    128], [LayoutType.RowMajor,    0]],
   ]
 
   instruction_sizes_1sm = [
@@ -8276,7 +8276,7 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
 
   cluster_shapes_2sm = [
     [2,1,1],
-    # [2,2,1],
+    [2,2,1],
     # [2,4,1],
     [4,1,1],
     # [4,2,1],
@@ -8294,6 +8294,8 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
   for math_inst in math_instructions_2sm:
     tile_descriptions = []
     for cluster_shape in cluster_shapes_2sm:
+      if cluster_shape not in [[2,1,1], [2,2,1]]:
+        continue
       multiplier_2sm = (1, 1, 1) if cluster_shape == DynamicClusterShape else (cluster_shape[0] // 2, cluster_shape[1], cluster_shape[2])
       tile_descriptions.append(
         TileDescription([
@@ -8326,8 +8328,8 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
       {
         "a_type"   : math_inst.element_a,
         "b_type"   : math_inst.element_b,
-        "c_type"   : DataType.f16,
-        "d_type"   : DataType.e5m2,
+        "c_type"   : DataType.void,
+        "d_type"   : DataType.e4m3,
         "acc_type" : math_inst.element_accumulator,
         "epi_type" : epi_type,
         "sf_type"  : math_inst.element_scale_factor,
@@ -8347,6 +8349,10 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
 
     # Set alignment d based on Destination format.
     for data_type in data_types:
+      if ( data_type["a_type"] != DataType.e4m3 or data_type["b_type"] != DataType.e4m3):
+        continue
+      if ( data_type["c_type"] != DataType.void or data_type["d_type"] != DataType.e4m3):
+        continue
       for layout in layouts:
         # alignment for a
         layout[0][1] = get_tma_alignment_elt(data_type["a_type"])
@@ -10848,7 +10854,7 @@ def GenerateSM100(manifest, cuda_version):
   # if '100f' not in architectures and '101f' not in architectures:
   #   GenerateSM100_TensorOp_int8_UMMA_gemm(manifest, cuda_version)
 
-  GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version)
   # grouped GEMM
   # GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
   # GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
@@ -10875,7 +10881,7 @@ def GenerateSM100(manifest, cuda_version):
   #
   # Block Scaled Gemm
   #
-  # GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cuda_version)
+  GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cuda_version)
   GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version)
   # GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version,  gemm_kind=GemmKind.GroupedBlockScaledUniversal3x)
   #
