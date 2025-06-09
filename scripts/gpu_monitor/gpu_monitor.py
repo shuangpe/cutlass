@@ -65,6 +65,82 @@ def initialize_nvml():
         print(f"NVML initialization failed: {err}")
         return False
 
+def set_gpu_frequency(gpu_id, frequency_str):
+    """Set GPU frequency (graphics clock) to the specified value in MHz
+
+    Args:
+        gpu_id: GPU ID to set frequency for
+        frequency_str: String of frequencies in MHz separated by semicolons, or -1 to skip
+    """
+    if not frequency_str:
+        return False, "No frequency specified (skipping frequency setting)"
+
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_id)
+
+        # Get supported clock frequencies
+        mem_clocks = pynvml.nvmlDeviceGetSupportedMemoryClocks(handle)
+        if not mem_clocks:
+            return False, "Could not get supported memory clocks"
+
+        # Get current memory clock to maintain it
+        current_mem_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_MEM)
+
+        # Find closest supported memory clock
+        closest_mem_clock = mem_clocks[0]
+        for mem_clock in mem_clocks:
+            if abs(mem_clock - current_mem_clock) < abs(closest_mem_clock - current_mem_clock):
+                closest_mem_clock = mem_clock
+
+        # Get supported graphics clocks for this memory clock
+        graphics_clocks = pynvml.nvmlDeviceGetSupportedGraphicsClocks(handle, closest_mem_clock)
+        if not graphics_clocks:
+            return False, f"Could not get supported graphics clocks for memory clock {closest_mem_clock} MHz"
+
+        # Parse frequency string into a list of frequencies
+        frequency_list = [int(f.strip()) for f in frequency_str.split(';') if f.strip() and f.strip() != "-1"]
+
+        # Always include a run without setting frequency
+        print("Will run a test without setting GPU frequency")
+
+        if not frequency_list:
+            return False, "No valid frequencies provided after parsing or only -1 provided (will run with default frequency)"
+
+        # Find closest supported graphics clock to any of the requested frequencies
+        closest_freq = graphics_clocks[0]
+        min_diff = abs(closest_freq - frequency_list[0])
+
+        for requested_freq in frequency_list:
+            for clock in graphics_clocks:
+                diff = abs(clock - requested_freq)
+                if diff < min_diff:
+                    min_diff = diff
+                    closest_freq = clock
+
+        print(f"Setting GPU {gpu_id} frequency to {closest_freq} MHz (requested {frequency_str})")
+        print(f"Supported clocks for memory clock {closest_mem_clock} MHz: {graphics_clocks}")
+
+        # Set the application clocks
+        pynvml.nvmlDeviceSetApplicationsClocks(handle, closest_mem_clock, closest_freq)
+
+        # Verify the setting
+        current_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)
+        print(f"GPU {gpu_id} frequency set to {current_clock} MHz")
+
+        return True, f"Successfully set GPU frequency to {closest_freq} MHz"
+    except pynvml.NVMLError as err:
+        return False, f"Failed to set GPU frequency: {err}"
+
+def reset_gpu_frequency(gpu_id):
+    """Reset GPU clocks to default"""
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_id)
+        pynvml.nvmlDeviceResetApplicationsClocks(handle)
+        print(f"Reset GPU {gpu_id} frequency to default")
+        return True, "Successfully reset GPU frequency"
+    except pynvml.NVMLError as err:
+        return False, f"Failed to reset GPU frequency: {err}"
+
 def get_gpu_metrics(handle):
     """Get all monitored GPU metrics"""
     metrics = {}
@@ -125,6 +201,19 @@ def get_gpu_metrics(handle):
 
     return metrics
 
+def get_next_output_directory():
+    """Find the next available output directory with pattern 20250609_gpu_metrics_X"""
+    base_name = "20250609_gpu_metrics_"
+    index = 0
+
+    while True:
+        dir_name = f"{base_name}{index}"
+        if not os.path.exists(dir_name):
+            # Create the directory
+            os.makedirs(dir_name)
+            return dir_name
+        index += 1
+
 def monitor_gpu(gpu_id, interval, output_file, stop_event, system_info):
     """Continuously monitor GPU metrics and record to CSV file"""
     if not initialize_nvml():
@@ -173,6 +262,11 @@ def monitor_gpu(gpu_id, interval, output_file, stop_event, system_info):
         print("GPU Monitoring Capabilities:")
         for capability, available in capabilities.items():
             print(f"  {capability}: {'Available' if available else 'Not Available'}")
+
+        # Ensure directory exists for the output file
+        output_dir = os.path.dirname(output_file)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
 
         # Create CSV file and write header
         with open(output_file, 'w', newline='') as csvfile:
@@ -271,6 +365,8 @@ def main():
     parser.add_argument('-o', '--output', type=str, default='', help='Output CSV filename')
     parser.add_argument('-w', '--warmup', type=int, default=3, help='Warmup time (seconds)')
     parser.add_argument('-c', '--cooldown', type=int, default=3, help='Cooldown time (seconds)')
+    parser.add_argument('-f', '--frequency', type=str, default=None,
+                        help='Set GPU frequency in MHz for the test. Can be a single value, multiple values separated by semicolons, or -1 to skip. Example: "1000" or "900;1000;1100"')
 
     args = parser.parse_args()
 
@@ -283,19 +379,61 @@ def main():
     for key, value in system_info.items():
         print(f"  {key}: {value}")
 
-    # Default output filename
-    if not args.output:
-        # Extract just the base filename without extension
-        base_name = os.path.basename(args.executable)
-        filename_without_ext = os.path.splitext(base_name)[0]
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        args.output = f"gpu_metrics_{filename_without_ext}_{timestamp}.csv"
+    # Get output directory
+    output_dir = get_next_output_directory()
+    print(f"All output files will be saved to: {output_dir}")
+
+    # Prepare frequency list - always include default (no setting)
+    freq_list = ["oob"]  # Out of box (default) frequency
+
+    # Add user-specified frequencies if provided
+    if args.frequency:
+        user_freqs = [f.strip() for f in args.frequency.split(';') if f.strip() and f.strip() != "-1"]
+        freq_list.extend(user_freqs)
+
+    # Run tests for each frequency
+    for freq in freq_list:
+        # Run independent test for each frequency
+        run_single_test(args, system_info.copy(), freq, output_dir)
+
+    print(f"\nAll tests completed. Results saved in {output_dir}/")
+    return 0
+
+def run_single_test(args, system_info, frequency, output_dir):
+    """Run a single independent test with the specified frequency"""
+    # Create frequency-specific output file
+    base_name = os.path.basename(args.executable)
+    filename_without_ext = os.path.splitext(base_name)[0]
+
+    # Format frequency for filename
+    freq_suffix = "oobMhz" if frequency == "oob" else f"{frequency}Mhz"
+
+    # Create output filename
+    output_file = os.path.join(output_dir, f"{filename_without_ext}_{freq_suffix}.csv")
+
+    print(f"\n{'='*80}")
+    if frequency == "oob":
+        print(f"Running test with default GPU frequency (not setting frequency)")
+        system_info['frequency_setting'] = "Default (not set)"
+    else:
+        print(f"Running test with GPU frequency set to {frequency} MHz")
+        system_info['requested_gpu_frequency'] = f"{frequency} MHz"
+    print(f"Output will be saved to: {output_file}")
+    print(f"{'='*80}\n")
+
+    # Initialize NVML for frequency control if needed
+    frequency_set = False
+    if frequency != "oob":
+        initialize_nvml()
+        success, message = set_gpu_frequency(args.gpu, frequency)
+        frequency_set = success
+        print(message)
 
     # Create and start monitoring thread
     stop_event = threading.Event()
     monitor_thread = threading.Thread(
         target=monitor_gpu,
-        args=(args.gpu, args.interval, args.output, stop_event, system_info)
+        args=(args.gpu, args.interval, output_file, stop_event, system_info)
     )
     monitor_thread.daemon = True
     monitor_thread.start()
@@ -312,18 +450,16 @@ def main():
         print(f"Test ended, continuing to monitor metrics cooldown for {args.cooldown} seconds...")
         time.sleep(args.cooldown)
     finally:
+        # Reset GPU frequency if we set it
+        if frequency_set:
+            success, message = reset_gpu_frequency(args.gpu)
+            print(message)
+
         # Stop monitoring thread
         stop_event.set()
         monitor_thread.join()
 
-    print(f"GPU monitoring data saved to: {args.output}")
-
-    # Suggestion for using the visualization script
-    print("\nTo visualize the results, use the plot_gpu_metrics.py script:")
-    print(f"python3 plot_gpu_metrics.py {args.output}")
-    print("or")
-    print(f"python3 plot_gpu_metrics.py {args.output} --show")
-
+    print(f"GPU monitoring data saved to: {output_file}")
     return return_code
 
 if __name__ == "__main__":
