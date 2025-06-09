@@ -48,8 +48,6 @@ def get_system_info():
             result = subprocess.run([device_query_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             output = result.stdout.decode('utf-8')
             for line in output.split('\n'):
-                if 'CUDA Driver Version' in line:
-                    info['cuda_driver_version'] = line.strip()
                 if 'CUDA Runtime Version' in line:
                     info['cuda_runtime_version'] = line.strip()
     except Exception as e:
