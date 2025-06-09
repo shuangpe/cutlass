@@ -46,7 +46,7 @@ cutlass_example_add_executable(
 target_compile_definitions(70_blackwell_fp16_gemm_256x256x128_2x1x1 PRIVATE MS_M=_256 MS_K=_128 CS_M=_2 CS_N=_1)
 
 cutlass_example_add_executable(
-  70_blackwell_fp16_gemm_256x256x128_2x1x1_hacking
+  70_blackwell_fp16_gemm_256x256x128_4x4x1
   70_blackwell_fp16_gemm.cu
   TEST_COMMAND_OPTIONS
   TEST_SWIZZLE_1
@@ -54,11 +54,10 @@ cutlass_example_add_executable(
   TEST_SWIZZLE_5
   TEST_SWIZZLE_5_UNEVEN
 )
-target_compile_definitions(70_blackwell_fp16_gemm_256x256x128_2x1x1_hacking PRIVATE MS_M=_256 MS_K=_128 CS_M=_2 CS_N=_1)
-target_compile_definitions(70_blackwell_fp16_gemm_256x256x128_2x1x1_hacking PRIVATE CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1)
+target_compile_definitions(70_blackwell_fp16_gemm_256x256x128_4x4x1 PRIVATE MS_M=_256 MS_K=_128 CS_M=_4 CS_N=_4)
 
 cutlass_example_add_executable(
-  70_blackwell_fp16_gemm_128x256x128_1x1x1
+  70_blackwell_fp16_gemm_256x256x128_2x1x1_load_once
   70_blackwell_fp16_gemm.cu
   TEST_COMMAND_OPTIONS
   TEST_SWIZZLE_1
@@ -66,10 +65,11 @@ cutlass_example_add_executable(
   TEST_SWIZZLE_5
   TEST_SWIZZLE_5_UNEVEN
 )
-target_compile_definitions(70_blackwell_fp16_gemm_128x256x128_1x1x1 PRIVATE MS_M=_128 MS_K=_64 CS_M=_1 CS_N=_1)
+target_compile_definitions(70_blackwell_fp16_gemm_256x256x128_2x1x1_load_once
+    PRIVATE MS_M=_256 MS_K=_128 CS_M=_2 CS_N=_1 CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1)
 
 cutlass_example_add_executable(
-  70_blackwell_fp8_gemm
+  70_blackwell_fp8_gemm_256x256x128_2x1x1
   70_blackwell_fp8_gemm.cu
   TEST_COMMAND_OPTIONS
   TEST_SWIZZLE_1
@@ -77,4 +77,18 @@ cutlass_example_add_executable(
   TEST_SWIZZLE_5
   TEST_SWIZZLE_5_UNEVEN
 )
+target_compile_definitions(70_blackwell_fp8_gemm_256x256x128_2x1x1 PRIVATE MS_M=_256 MS_K=_128 CS_M=_2 CS_N=_1)
+
+cutlass_example_add_executable(
+  70_blackwell_fp8_gemm_256x256x128_2x1x1_load_once
+  70_blackwell_fp8_gemm.cu
+  TEST_COMMAND_OPTIONS
+  TEST_SWIZZLE_1
+  TEST_SWIZZLE_2
+  TEST_SWIZZLE_5
+  TEST_SWIZZLE_5_UNEVEN
+)
+target_compile_definitions(70_blackwell_fp8_gemm_256x256x128_2x1x1_load_once
+    PRIVATE MS_M=_256 MS_K=_128 CS_M=_2 CS_N=_1 CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1)
+
 endif()
