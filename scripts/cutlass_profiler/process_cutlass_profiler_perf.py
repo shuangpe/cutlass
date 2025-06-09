@@ -20,7 +20,7 @@ def setup_logging(verbose: bool = False) -> None:
 def extract_gpu_frequency(filename: str) -> str:
     """Extract GPU frequency from filename"""
     freq_match = re.search(r'(\d+)mhz', filename.lower())
-    return freq_match.group(1) if freq_match else "unknown"
+    return freq_match.group(1) if freq_match else "oob"
 
 def extract_gemmkind(filename: str) -> str:
     """Extract GemmKind information from filename (was MMAOP)"""
@@ -33,6 +33,10 @@ def extract_datatypes(operation: str) -> str:
     datatypes_match = re.search(r'tensorop_gemm_(.*?)_\d+x\d+x\d+', operation)
     datatypes = datatypes_match.group(1) if datatypes_match else 'unknown'
     return datatypes
+
+def extract_stream_k(operation: str) -> str:
+    """Extract stream_k information from operation name"""
+    return "Y" if 'stream_k' in operation else "N"
 
 def process_csv_row(row: Dict[str, str], gpu_freq: str, gemmkind: str) -> Dict[str, str]:
     """Process a single row of CSV data, adding shape columns to the left and keeping all columns"""
@@ -51,6 +55,7 @@ def process_csv_row(row: Dict[str, str], gpu_freq: str, gemmkind: str) -> Dict[s
 
     gflops = float(row['GFLOPs'])
     datatypes = extract_datatypes( row['Operation'])
+    stream_k = extract_stream_k(row['Operation'])
 
     # New columns are placed at the left, followed by the original columns
     new_row = {
@@ -62,6 +67,7 @@ def process_csv_row(row: Dict[str, str], gpu_freq: str, gemmkind: str) -> Dict[s
         'ClusterShape': cluster_shape,
         'WarpsShape': warps_shape,
         'InstructShape': instruct_shape,
+        'StreamK': stream_k
     }
     new_row.update(filtered_row)
     return new_row
@@ -114,8 +120,8 @@ def generate_output_columns(all_data: List[Dict[str, str]]) -> List[str]:
         return []
     # New column order
     new_columns = [
-        'TFLOPs', 'GPUFreq', 'GemmKind', 'DataTypes',
-        'ProblemShape', 'CtaShape', 'ClusterShape', 'WarpsShape', 'InstructShape'
+        'TFLOPs', 'GPUFreq', 'DataTypes',
+        'ProblemShape', 'CtaShape', 'ClusterShape', 'WarpsShape', 'InstructShape', 'StreamK', 'GemmKind'
     ]
     # Collect all encountered fields
     all_keys = []
