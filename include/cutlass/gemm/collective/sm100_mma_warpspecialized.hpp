@@ -601,6 +601,8 @@ struct CollectiveMma<
 
     auto barrier_token = mainloop_pipeline.producer_try_acquire(mainloop_pipe_producer_state);
 
+    static uint32_t slm_write_count = 0;
+
     // Issue the Mainloop loads
     CUTLASS_PRAGMA_NO_UNROLL
     while (k_tile_count > 0) {
@@ -614,10 +616,21 @@ struct CollectiveMma<
       ++mainloop_pipe_producer_state;
       barrier_token = mainloop_pipeline.producer_try_acquire(mainloop_pipe_producer_state);
 
+#if HACK_GEMM_WRITE_SLM_ONCE
+      if (slm_write_count < MainloopPipeline::Stages) {
+#endif
+
       if (cute::elect_one_sync()) {
         copy(observed_tma_load_a_->with(*tma_barrier, mcast_mask_a), tAgA(_,*k_tile_iter), tAsA(_,write_stage));
         copy(observed_tma_load_b_->with(*tma_barrier, mcast_mask_b), tBgB(_,*k_tile_iter), tBsB(_,write_stage));
       }
+
+#if HACK_GEMM_WRITE_SLM_ONCE
+      } else {
+        mainloop_pipeline.producer_commit(mainloop_pipe_producer_state, TmaTransactionBytes);
+      }
+      ++slm_write_count;
+#endif
 
       --k_tile_count;
       ++k_tile_iter;

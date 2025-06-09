@@ -97,17 +97,23 @@ namespace cute
 #  define CUTE_CHECK_ERROR(e) CUTE_ERROR_EXIT(e)
 #endif
 
-// A dummy function that uses compilation failure to print a type
+// Declare primary template without implementation, so compiler won't find it
+template <class... T>
+struct print_type_impl;
+
+// Helper function to display types
 template <class... T>
 CUTE_HOST_DEVICE void
 print_type() {
-  static_assert(sizeof...(T) < 0, "Printing type T.");
+  // Attempt to use undefined template instantiation, causing compilation error that shows the type
+  print_type_impl<T...>{};
 }
 
 template <class... T>
 CUTE_HOST_DEVICE void
 print_type(T&&...) {
-  static_assert(sizeof...(T) < 0, "Printing type T.");
+  // Attempt to use undefined template instantiation, causing compilation error that shows the type
+  print_type_impl<T...>{};
 }
 
 //
