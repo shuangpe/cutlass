@@ -14,7 +14,6 @@ def get_system_info():
     info = {}
 
     # System information
-    info['hostname'] = platform.node()
     info['system'] = platform.system()
     info['architecture'] = platform.machine()
     info['python_version'] = platform.python_version()
@@ -39,19 +38,6 @@ def get_system_info():
             info['cuda_version'] = "Not found in nvcc output"
     except Exception as e:
         info['cuda_version'] = f"Error: {str(e)}"
-
-    # Try to get CUDA runtime version through deviceQuery if available
-    try:
-        result = subprocess.run(['which', 'deviceQuery'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if result.returncode == 0:
-            device_query_path = result.stdout.decode('utf-8').strip()
-            result = subprocess.run([device_query_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            output = result.stdout.decode('utf-8')
-            for line in output.split('\n'):
-                if 'CUDA Runtime Version' in line:
-                    info['cuda_runtime_version'] = line.strip()
-    except Exception as e:
-        info['devicequery_error'] = f"Error: {str(e)}"
 
     return info
 
@@ -107,27 +93,29 @@ def set_gpu_frequency(gpu_id, frequency_str):
             return False, "No valid frequencies provided after parsing or only -1 provided (will run with default frequency)"
 
         # Find closest supported graphics clock to any of the requested frequencies
-        closest_freq = graphics_clocks[0]
-        min_diff = abs(closest_freq - frequency_list[0])
+        # 修复查找最接近请求频率的算法
+        requested_freq = int(frequency_str) if frequency_str.isdigit() else int(frequency_list[0])
 
-        for requested_freq in frequency_list:
+        # 如果请求的频率在支持列表中，直接使用它
+        if requested_freq in graphics_clocks:
+            closest_freq = requested_freq
+            print(f"Requested frequency {requested_freq} MHz is directly supported")
+        else:
+            # 否则找到最接近的支持频率
+            closest_freq = graphics_clocks[0]
+            min_diff = abs(closest_freq - requested_freq)
+
             for clock in graphics_clocks:
                 diff = abs(clock - requested_freq)
                 if diff < min_diff:
                     min_diff = diff
                     closest_freq = clock
+            print(f"Requested frequency {requested_freq} MHz is not directly supported, using closest: {closest_freq} MHz")
 
         print(f"Setting GPU {gpu_id} frequency to {closest_freq} MHz (requested {frequency_str})")
-        print(f"Supported clocks for memory clock {closest_mem_clock} MHz: {graphics_clocks}")
 
         # Set the application clocks
         pynvml.nvmlDeviceSetApplicationsClocks(handle, closest_mem_clock, closest_freq)
-
-        # Verify the setting
-        current_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)
-        print(f"GPU {gpu_id} frequency set to {current_clock} MHz")
-
-        return True, f"Successfully set GPU frequency to {closest_freq} MHz"
     except pynvml.NVMLError as err:
         return False, f"Failed to set GPU frequency: {err}"
 
@@ -203,7 +191,7 @@ def get_gpu_metrics(handle):
 
 def get_next_output_directory(path, is_dir=False):
     """Find the next available output directory with pattern YYYYMMDD_gpu_metrics_name_X
-    
+
     Args:
         path: Path to executable or directory
         is_dir: If True, use the directory name as base; otherwise use executable name
@@ -324,7 +312,7 @@ def monitor_gpu(gpu_id, interval, output_file, stop_event, system_info):
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
 
-            # Continuously monitor until stop signal received
+            # Continuously monitor until stop event received
             while not stop_event.is_set():
                 # Modified timestamp format: YYYYMMDD-HH:MM:SS.mmmmmm
                 timestamp = datetime.now().strftime('%Y%m%d-%H:%M:%S.%f')
@@ -385,8 +373,8 @@ def main():
     parser.add_argument('-o', '--output', type=str, default='', help='Output CSV filename')
     parser.add_argument('-w', '--warmup', type=int, default=3, help='Warmup time (seconds)')
     parser.add_argument('-c', '--cooldown', type=int, default=3, help='Cooldown time (seconds)')
-    parser.add_argument('-f', '--frequency', type=str, default=None,
-                        help='Set GPU frequency in MHz for the test. Can be a single value, multiple values separated by semicolons, or -1 to skip. Example: "1000" or "900;1000;1100"')
+    parser.add_argument('-f', '--frequency', type=str, default="1500;1305;1005",
+                        help='Set GPU frequency in MHz for the test. Can be a single value, multiple values separated by semicolons, or -1 to skip. Default: "1500;1305;1005"')
 
     args = parser.parse_args()
 
@@ -398,6 +386,11 @@ def main():
     print("System Information:")
     for key, value in system_info.items():
         print(f"  {key}: {value}")
+
+    # Initialize NVML once at the beginning
+    nvml_initialized = initialize_nvml()
+    if not nvml_initialized:
+        print("Warning: Failed to initialize NVML. Frequency control may not work.")
 
     # Prepare frequency list - always include default (no setting)
     freq_list = ["oob"]  # Out of box (default) frequency
@@ -472,15 +465,16 @@ def run_single_test(args, system_info, frequency, output_dir):
     print(f"Output will be saved to: {output_file}")
     print(f"{'='*80}\n")
 
-    # Initialize NVML for frequency control if needed
+    # Set GPU frequency if needed, but don't re-initialize NVML
     frequency_set = False
     if frequency != "oob":
-        initialize_nvml()
+        # Don't call initialize_nvml() here, we did it once in main()
         success, message = set_gpu_frequency(args.gpu, frequency)
         frequency_set = success
-        print(message)
+        # Print actual set frequency for clarity
+        print(f"GPU {args.gpu} frequency setting status: {message}")
 
-    # Create and start monitoring thread
+    # Create monitoring thread with fresh NVML initialization just for monitoring
     stop_event = threading.Event()
     monitor_thread = threading.Thread(
         target=monitor_gpu,
