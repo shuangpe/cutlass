@@ -127,7 +127,7 @@ def generate_freq_script(script_path, gpu_id, min_freq, max_freq, operation, ker
         f"python3 {gpu_freq_collector_path} \\",
         "  --gpu-id=$gpu_id \\",
         "  --output=$freq_log_filename \\",
-        "  --interval=0.1 &",
+        "  --interval=0.001 &",
         "",
         "MONITOR_PID=$!",
         "echo \"GPU frequency monitoring started with PID: $MONITOR_PID\"",

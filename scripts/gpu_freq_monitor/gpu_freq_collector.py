@@ -9,7 +9,7 @@ import sys
 import argparse
 
 class GpuClockMonitor:
-    def __init__(self, gpu_id, output_file, sample_interval=0.1):
+    def __init__(self, gpu_id, output_file, sample_interval=0.001):
         self.gpu_id = gpu_id
         self.output_file = output_file
         self.sample_interval = sample_interval
@@ -94,7 +94,7 @@ def main():
     parser = argparse.ArgumentParser(description='Monitor GPU frequency')
     parser.add_argument('--gpu-id', type=int, required=True, help='GPU ID to monitor')
     parser.add_argument('--output', type=str, required=True, help='Output CSV file path')
-    parser.add_argument('--interval', type=float, default=0.1, help='Sampling interval (seconds)')
+    parser.add_argument('--interval', type=float, default=0.001, help='Sampling interval (seconds)')
 
     args = parser.parse_args()
 
