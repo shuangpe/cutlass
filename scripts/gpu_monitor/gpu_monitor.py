@@ -6,6 +6,7 @@ import csv
 import subprocess
 import threading
 import platform
+import os
 from datetime import datetime
 
 def get_system_info():
@@ -282,8 +283,11 @@ def main():
 
     # Default output filename
     if not args.output:
+        # Extract just the base filename without extension
+        base_name = os.path.basename(args.executable)
+        filename_without_ext = os.path.splitext(base_name)[0]
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        args.output = f"gpu_metrics_{args.executable}_{timestamp}.csv"
+        args.output = f"gpu_metrics_{filename_without_ext}_{timestamp}.csv"
 
     # Create and start monitoring thread
     stop_event = threading.Event()
