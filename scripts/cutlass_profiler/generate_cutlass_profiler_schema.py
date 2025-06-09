@@ -239,9 +239,9 @@ def main():
     # Generate freq/operation scripts and add to main script
     for operation in operations:
         operation_lower = operation.lower()
-        kernel_filters = ["f16_f16_f32_void_f16", "e4m3_e4m3_f32_void_e4m3"] if operation_lower == "gemm" else ["ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1"]
+        kernel_filters = ["f16_f16_f32_void_f16", "ue8m0xe4m3_ue8m0xe4m3_f32_void_ue8m0xe4m3"] if operation_lower == "gemm" else ["ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1"]
         for kernel_filter in kernel_filters:
-            precision_str = "fp8"
+            precision_str = "mxfp8"
             if kernel_filter == "ue4m3xe2m1_ue4m3xe2m1_f32_void_ue4m3xe2m1":
                 precision_str = "nvfp4"
             elif kernel_filter == "f16_f16_f32_void_f16":
