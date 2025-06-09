@@ -94,7 +94,8 @@ def get_gpu_metrics(handle):
     # Get GPU clock frequencies
     # 1. Get current SM clock (also represents Tensor Core frequency)
     try:
-        metrics['sm_clock'] = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_SM)
+        sm_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_SM)
+        metrics['sm_clock'] = sm_clock
     except pynvml.NVMLError as err:
         metrics['sm_clock'] = "N/A"
         print(f"Failed to get SM clock frequency: {err}")
@@ -108,9 +109,11 @@ def get_gpu_metrics(handle):
 
     # 3. Get graphics clock
     try:
-        metrics['graphics_clock'] = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)
+        graphics_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)
+        metrics['graphics_clock'] = graphics_clock
     except pynvml.NVMLError as err:
         metrics['graphics_clock'] = "N/A"
+        print(f"Failed to get graphics clock frequency: {err}")
 
     # Get GPU utilization
     try:
@@ -191,8 +194,9 @@ def monitor_gpu(gpu_id, interval, output_file, stop_event, system_info):
             for capability, available in capabilities.items():
                 csvfile.write(f"# {capability}: {'Available' if available else 'Not Available'}\n")
 
-            # Write note about Tensor Core frequency
+            # Write note about clock frequencies
             csvfile.write("# Note: Tensor Core does not have separate frequency monitoring; it runs at SM clock frequency\n")
+            csvfile.write("# Note: On many NVIDIA GPU architectures, SM clock and Graphics clock report identical values\n")
 
             # CSV data fields with units
             fieldnames = [

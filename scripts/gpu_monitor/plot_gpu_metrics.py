@@ -45,47 +45,72 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix=""):
     start_time = df['timestamp'].iloc[0]
     df['relative_time'] = [(t - start_time).total_seconds() for t in df['timestamp']]
 
-    # Create chart
-    fig, axes = plt.subplots(4, 1, figsize=(12, 16), sharex=True)
+    # Create chart - 修改图表宽度，增加30%
+    fig, axes = plt.subplots(4, 1, figsize=(15.6, 16), sharex=True)
     fig.suptitle(f"{title_prefix}GPU Monitoring Metrics", fontsize=16)
 
-    # Plot frequency chart
+    # Plot frequency chart - 修改颜色以提高区分度
     axes[0].set_title('GPU Frequency')
-    axes[0].plot(df['relative_time'], df['sm_clock (MHz)'], label='SM Clock')
-    axes[0].plot(df['relative_time'], df['mem_clock (MHz)'], label='Memory Clock')
-    axes[0].plot(df['relative_time'], df['graphics_clock (MHz)'], label='Graphics Clock')
+    axes[0].plot(df['relative_time'], df['sm_clock (MHz)'], label='SM Clock', color='red')
+    axes[0].plot(df['relative_time'], df['graphics_clock (MHz)'], label='Graphics Clock', color='green')
     axes[0].set_ylabel('Frequency (MHz)')
-    axes[0].legend()
+    axes[0].legend(loc='upper right')
     axes[0].grid(True)
 
     # Plot temperature chart
     axes[1].set_title('GPU Temperature')
     axes[1].plot(df['relative_time'], df['temperature (°C)'], 'r-', label='Temperature')
     axes[1].set_ylabel('Temperature (°C)')
-    axes[1].legend()
+    axes[1].legend(loc='upper right')
     axes[1].grid(True)
 
     # Plot power chart
     axes[2].set_title('GPU Power')
-    axes[2].plot(df['relative_time'], df['power_draw (W)'], 'g-', label='Average Power')
+    axes[2].plot(df['relative_time'], df['power_draw (W)'], 'g-', label='Power Draw')
     if not df['instantaneous_power (W)'].isna().all():
         axes[2].plot(df['relative_time'], df['instantaneous_power (W)'], 'g--', label='Instantaneous Power')
     axes[2].set_ylabel('Power (W)')
-    axes[2].legend()
+    axes[2].legend(loc='upper right')
     axes[2].grid(True)
 
     # Plot utilization chart
     axes[3].set_title('GPU Utilization')
-    axes[3].plot(df['relative_time'], df['gpu_utilization (%)'], label='GPU Utilization')
-    axes[3].plot(df['relative_time'], df['memory_utilization (%)'], label='Memory Utilization')
+    axes[3].plot(df['relative_time'], df['gpu_utilization (%)'], label='GPU Utilization', color='blue')
+    axes[3].plot(df['relative_time'], df['memory_utilization (%)'], label='Memory Utilization', color='cyan')
     axes[3].set_ylabel('Utilization (%)')
     axes[3].set_xlabel('Time (seconds)')
-    axes[3].legend()
+    axes[3].legend(loc='upper right')
     axes[3].grid(True)
 
-    # Beautify X axis
+    # Beautify X axis - 修改这部分代码
+    from matplotlib.ticker import FuncFormatter, MultipleLocator
+    
+    # 自定义格式化函数，将秒转换为 "秒.毫秒" 格式
+    def format_time(x, pos):
+        total_seconds = int(x)  # 整数部分是总秒数
+        milliseconds = int((x % 1) * 1000)  # 小数部分转为毫秒
+        # 每10毫秒为单位显示
+        return f"{total_seconds}.{milliseconds//10:02d}"
+    
     for ax in axes:
-        ax.set_xlim(0, max(df['relative_time']))
+        ax.xaxis.set_major_formatter(FuncFormatter(format_time))
+        # 设置合适的主刻度和次刻度
+        time_range = df['relative_time'].max() - df['relative_time'].min()
+        if time_range < 1:  # 小于1秒
+            ax.xaxis.set_major_locator(MultipleLocator(0.1))  # 每0.1秒一个主刻度
+        elif time_range < 10:  # 1-10秒
+            ax.xaxis.set_major_locator(MultipleLocator(0.5))  # 每0.5秒一个主刻度
+        elif time_range < 60:  # 小于1分钟
+            ax.xaxis.set_major_locator(MultipleLocator(0.5))  # 每0.5秒一个主刻度
+        else:  # 大于1分钟
+            ax.xaxis.set_major_locator(MultipleLocator(2))  # 每2秒一个主刻度，大范围时保持更低密度
+        
+        # 设置横轴标签倾斜45度
+        for label in ax.get_xticklabels():
+            label.set_rotation(45)
+            label.set_ha('right')  # 水平对齐方式为右对齐
+        
+        ax.set_xlim(df['relative_time'].min(), df['relative_time'].max())
 
     plt.tight_layout()
     plt.subplots_adjust(top=0.95)
