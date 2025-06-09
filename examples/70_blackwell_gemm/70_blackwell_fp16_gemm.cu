@@ -58,6 +58,7 @@
 
 
 #include <iostream>
+#include <chrono>
 
 #include "cutlass/cutlass.h"
 
@@ -122,7 +123,7 @@ using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBui
     MmaTileShape_MNK, ClusterShape_MNK,
     cutlass::epilogue::collective::EpilogueTileAuto,
     ElementAccumulator, ElementAccumulator,
-    void, LayoutC, AlignmentC,
+    ElementC, LayoutC, AlignmentC,
     ElementC, LayoutC, AlignmentC,
     cutlass::epilogue::collective::EpilogueScheduleAuto
   >::CollectiveOp;
@@ -399,14 +400,30 @@ int run(Options &options)
   // Initialize CUTLASS kernel with arguments and workspace pointer
   CUTLASS_CHECK(gemm.initialize(arguments, workspace.get()));
 
+  auto get_timestamp = []() {
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+    std::ostringstream timestamp;
+    timestamp << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S")
+              << "." << std::setfill('0') << std::setw(3) << now_ms.count();
+    return timestamp.str();
+  };
+
+  std::cout << "  [" << get_timestamp() << "] Start warmup and correctness check for CUTLASS kernel." << std::endl;
+
   // Correctness / Warmup iteration
-  CUTLASS_CHECK(gemm.run());
+  for (int iter = 0; iter < 30; ++iter) {
+    CUTLASS_CHECK(gemm.run());
+  }
 
   // Check if output from CUTLASS kernel and reference kernel are equal or not
   Result result;
   result.passed = verify(options);
 
-  std::cout << "  Disposition: " << (result.passed ? "Passed" : "Failed") << std::endl;
+  std::cout << "  [" << get_timestamp() << "] "
+            << "Disposition: " << (result.passed ? "Passed" : "Failed") << std::endl;
 
   if (!result.passed) {
     exit(-1);
@@ -415,6 +432,8 @@ int run(Options &options)
   // Run profiling loop
   if (options.iterations > 0)
   {
+     std::cout << "  [" << get_timestamp() << "] "
+               << "Start profiling CUTLASS kernel for " << options.iterations << " iterations." << std::endl;
     GpuTimer timer;
     timer.start();
     for (int iter = 0; iter < options.iterations; ++iter) {
@@ -428,7 +447,8 @@ int run(Options &options)
     result.avg_runtime_ms = double(elapsed_ms) / double(options.iterations);
     result.gflops = options.gflops(result.avg_runtime_ms / 1000.0);
 
-
+    std::cout << "  [" << get_timestamp() << "] "
+              << "Profiling completed. Results:" << std::endl;
     std::cout << "  Problem Size: " << options.m << 'x' << options.n << 'x' << options.k << std::endl;
     std::cout << "  Avg runtime: " << result.avg_runtime_ms << " ms" << std::endl;
     std::cout << "  GFLOPS: " << result.gflops << std::endl;
