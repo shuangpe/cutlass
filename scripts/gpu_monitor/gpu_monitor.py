@@ -201,9 +201,28 @@ def get_gpu_metrics(handle):
 
     return metrics
 
-def get_next_output_directory():
-    """Find the next available output directory with pattern 20250609_gpu_metrics_X"""
-    base_name = "20250609_gpu_metrics_"
+def get_next_output_directory(path, is_dir=False):
+    """Find the next available output directory with pattern YYYYMMDD_gpu_metrics_name_X
+    
+    Args:
+        path: Path to executable or directory
+        is_dir: If True, use the directory name as base; otherwise use executable name
+    """
+    if is_dir:
+        # Use the directory's basename
+        dir_basename = os.path.basename(os.path.normpath(path))
+        base_name_part = dir_basename
+    else:
+        # Extract base name of executable without extension
+        base_executable = os.path.basename(path)
+        base_name_part = os.path.splitext(base_executable)[0]
+
+    # Get current date as timestamp
+    current_date = datetime.now().strftime('%Y%m%d')
+
+    # Create base directory name pattern
+    base_name = f"{current_date}_gpu_metrics_{base_name_part}_"
+
     index = 0
 
     while True:
@@ -360,7 +379,8 @@ def main():
     parser = argparse.ArgumentParser(description='Comprehensive monitoring of GPU metrics (power, temperature, frequency) during GEMM kernel execution')
     parser.add_argument('-g', '--gpu', type=int, default=0, help='GPU ID')
     parser.add_argument('-i', '--interval', type=float, default=0.05, help='Sampling interval (seconds)')
-    parser.add_argument('-e', '--executable', type=str, required=True, help='GEMM executable to run')
+    parser.add_argument('-e', '--executable', type=str, required=True,
+                        help='GEMM executable to run. If a directory is specified, all executable files in that directory will be tested')
     parser.add_argument('-a', '--args', type=str, default='', help='Arguments to pass to the GEMM executable')
     parser.add_argument('-o', '--output', type=str, default='', help='Output CSV filename')
     parser.add_argument('-w', '--warmup', type=int, default=3, help='Warmup time (seconds)')
@@ -379,10 +399,6 @@ def main():
     for key, value in system_info.items():
         print(f"  {key}: {value}")
 
-    # Get output directory
-    output_dir = get_next_output_directory()
-    print(f"All output files will be saved to: {output_dir}")
-
     # Prepare frequency list - always include default (no setting)
     freq_list = ["oob"]  # Out of box (default) frequency
 
@@ -391,10 +407,45 @@ def main():
         user_freqs = [f.strip() for f in args.frequency.split(';') if f.strip() and f.strip() != "-1"]
         freq_list.extend(user_freqs)
 
-    # Run tests for each frequency
-    for freq in freq_list:
-        # Run independent test for each frequency
-        run_single_test(args, system_info.copy(), freq, output_dir)
+    # Determine executables to test and output directory
+    if os.path.isdir(args.executable):
+        print(f"Directory specified: {args.executable}")
+        # Get all files in the directory
+        all_files = [os.path.join(args.executable, f) for f in os.listdir(args.executable)]
+        # Filter to get only executable files
+        executables = [f for f in all_files if os.path.isfile(f) and os.access(f, os.X_OK)]
+
+        if not executables:
+            print(f"No executable files found in directory: {args.executable}")
+            return 1
+
+        print(f"Found {len(executables)} executable files to test")
+        for exe in executables:
+            print(f"  - {os.path.basename(exe)}")
+
+        # Get a single output directory for all executables based on directory name
+        output_dir = get_next_output_directory(args.executable, is_dir=True)
+    else:
+        # Single executable file
+        executables = [args.executable]
+        output_dir = get_next_output_directory(args.executable)
+
+    print(f"All output files will be saved to: {output_dir}")
+
+    # Process each executable
+    for executable in executables:
+        if len(executables) > 1:
+            print(f"\n{'#'*100}")
+            print(f"Testing executable: {executable}")
+            print(f"{'#'*100}\n")
+
+        # Create a copy of args with the current executable
+        current_args = argparse.Namespace(**vars(args))
+        current_args.executable = executable
+
+        # Run tests for all frequencies for this executable
+        for freq in freq_list:
+            run_single_test(current_args, system_info.copy(), freq, output_dir)
 
     print(f"\nAll tests completed. Results saved in {output_dir}/")
     return 0
@@ -461,6 +512,14 @@ def run_single_test(args, system_info, frequency, output_dir):
 
     print(f"GPU monitoring data saved to: {output_file}")
     return return_code
+
+def run_tests_with_frequencies(args, system_info, freq_list, output_dir):
+    """Run tests with all specified frequencies for a single executable"""
+    for freq in freq_list:
+        # Run independent test for each frequency
+        run_single_test(args, system_info.copy(), freq, output_dir)
+
+    print(f"All frequency tests completed for {args.executable}. Results saved in {output_dir}/")
 
 if __name__ == "__main__":
     main()
