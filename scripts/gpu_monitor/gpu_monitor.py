@@ -99,9 +99,6 @@ def set_gpu_frequency(gpu_id, frequency_str):
         # Parse frequency string into a list of frequencies
         frequency_list = [int(f.strip()) for f in frequency_str.split(';') if f.strip() and f.strip() != "-1"]
 
-        # Always include a run without setting frequency
-        print("Will run a test without setting GPU frequency")
-
         if not frequency_list:
             return False, "No valid frequencies provided after parsing or only -1 provided (will run with default frequency)"
 
@@ -509,14 +506,6 @@ def run_single_test(args, system_info, frequency, output_dir):
 
     print(f"GPU monitoring data saved to: {output_file}")
     return return_code
-
-def run_tests_with_frequencies(args, system_info, freq_list, output_dir):
-    """Run tests with all specified frequencies for a single executable"""
-    for freq in freq_list:
-        # Run independent test for each frequency
-        run_single_test(args, system_info.copy(), freq, output_dir)
-
-    print(f"All frequency tests completed for {args.executable}. Results saved in {output_dir}/")
 
 if __name__ == "__main__":
     main()
