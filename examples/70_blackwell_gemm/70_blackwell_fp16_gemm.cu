@@ -117,6 +117,12 @@ using MmaTileShape_MNK = Shape<MS_M,_256,MS_K>;
 // Shape of the threadblocks in a cluster
 using ClusterShape_MNK = Shape<CS_M,CS_N,_1>;
 
+#if defined(NO_LOAD_C)
+using FusionOp = cutlass::epilogue::fusion::ScaledAcc<ElementC, ElementAccumulator, ElementAccumulator>;
+#else
+using FusionOp = cutlass::epilogue::fusion::LinearCombination<ElementC, ElementAccumulator,ElementC, ElementAccumulator>;
+#endif
+
 // Build the epilogue
 using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
     ArchTag, OperatorClass, 
@@ -126,7 +132,7 @@ using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBui
     ElementC, LayoutC, AlignmentC,
     ElementC, LayoutC, AlignmentC,
     cutlass::epilogue::collective::EpilogueScheduleAuto,
-    cutlass::epilogue::fusion::ScaledAcc<ElementC, ElementAccumulator, ElementAccumulator>
+    FusionOp
   >::CollectiveOp;
 
 // Build the mainloop
