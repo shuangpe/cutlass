@@ -104,25 +104,25 @@ def get_stats_text(series, label, df=None, filter_zeros=True, unit=""):
     if series.isna().all():
         return f"{label}: No data"
 
-    # 如果提供了完整DataFrame，使用过滤后的统计
+    # If full DataFrame is provided, use filtered statistics
     if df is not None and filter_zeros:
         stats = get_filtered_stats(df, series.name, filter_zeros)
         if stats:
             mean, median, min_val, max_val = stats
         else:
-            # 如果过滤统计失败，回退到普通统计
+            # If filtering fails, fall back to regular statistics
             mean = series.mean()
             median = series.median()
             min_val = series.min()
             max_val = series.max()
     else:
-        # 使用普通统计
+        # Use regular statistics
         mean = series.mean()
         median = series.median()
         min_val = series.min()
         max_val = series.max()
 
-    # 格式化文本，将单位放在括号里
+    # Format text, put unit in parentheses
     unit_str = f" ({unit})" if unit else ""
     return (f"{label}{unit_str}: Med={median:.1f}, Min={min_val:.1f}, "
             f"Max={max_val:.1f}, Avg={mean:.1f}")
@@ -190,12 +190,12 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     axes[1].set_title('GPU Power (W)')
     axes[1].plot(df['relative_time'], df['power_draw (W)'], 'g-', label='Power Draw')
 
-    # 添加功率中值虚线
+    # Add power median line
     power_filtered = df[df['gpu_utilization (%)'] > 0]['power_draw (W)']
     if not power_filtered.empty:
         power_median = power_filtered.median()
         line = axes[1].axhline(y=power_median, linestyle='--', color='lightgreen', alpha=0.8)
-        # 在左侧添加中值标签
+        # Add median label on the left
         axes[1].text(0.01, power_median, f"{power_median:.1f}W",
                     verticalalignment='center', color='green', fontsize=11,
                     bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
@@ -207,7 +207,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     axes[1].legend(loc='upper right')
     axes[1].grid(True)
 
-    # 添加统计信息到功率图
+    # Add statistics to power chart
     power_stats = get_stats_text(df['power_draw (W)'], "Power", df, unit="W")
     # Increase font size for statistics text
     axes[1].text(0.5, 0.08, power_stats, transform=axes[1].transAxes,
@@ -219,14 +219,14 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     axes[2].plot(df['relative_time'], df['sm_clock (MHz)'], label='SM Clock', color='red')
     axes[2].plot(df['relative_time'], df['graphics_clock (MHz)'], label='Graphics Clock', color='green')
 
-    # 添加频率中值虚线
+    # Add frequency median lines
     sm_freq_filtered = df[df['gpu_utilization (%)'] > 0]['sm_clock (MHz)']
     graphics_freq_filtered = df[df['gpu_utilization (%)'] > 0]['graphics_clock (MHz)']
 
     if not sm_freq_filtered.empty:
         sm_median = sm_freq_filtered.median()
         line = axes[2].axhline(y=sm_median, linestyle='--', color='lightcoral', alpha=0.8)
-        # 在左侧添加中值标签
+        # Add median label on the left
         axes[2].text(0.01, sm_median, f"{sm_median:.1f}MHz",
                     verticalalignment='center', color='red', fontsize=11,
                     bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
@@ -234,7 +234,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     if not graphics_freq_filtered.empty:
         gfx_median = graphics_freq_filtered.median()
         line = axes[2].axhline(y=gfx_median, linestyle='--', color='lightgreen', alpha=0.8)
-        # 在左侧添加中值标签
+        # Add median label on the left
         axes[2].text(0.01, gfx_median, f"{gfx_median:.1f}MHz",
                     verticalalignment='center', color='green', fontsize=11,
                     bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
@@ -243,7 +243,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     axes[2].legend(loc='upper right')
     axes[2].grid(True)
 
-    # 添加统计信息到频率图
+    # Add statistics to frequency chart
     sm_freq_stats = get_stats_text(df['sm_clock (MHz)'], "SM", df, unit="MHz")
     graphics_freq_stats = get_stats_text(df['graphics_clock (MHz)'], "GFX", df, unit="MHz")
     freq_stats_text = f"{sm_freq_stats}\n{graphics_freq_stats}"
@@ -256,12 +256,12 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     axes[3].set_title('GPU Temperature (°C)')
     axes[3].plot(df['relative_time'], df['temperature (°C)'], 'r-', label='Temperature')
 
-    # 添加温度中值虚线
+    # Add temperature median line
     temp_filtered = df[df['gpu_utilization (%)'] > 0]['temperature (°C)']
     if not temp_filtered.empty:
         temp_median = temp_filtered.median()
         line = axes[3].axhline(y=temp_median, linestyle='--', color='lightcoral', alpha=0.8)
-        # 在左侧添加中值标签
+        # Add median label on the left
         axes[3].text(0.01, temp_median, f"{temp_median:.1f}°C",
                     verticalalignment='center', color='red', fontsize=11,
                     bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
@@ -271,7 +271,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     axes[3].legend(loc='upper right')
     axes[3].grid(True)
 
-    # 添加统计信息到温度图
+    # Add statistics to temperature chart
     temp_stats = get_stats_text(df['temperature (°C)'], "Temp", df, unit="°C")
     axes[3].text(0.5, 0.08, temp_stats, transform=axes[3].transAxes,
                 fontsize=11, verticalalignment='bottom', horizontalalignment='center',
@@ -287,23 +287,24 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
         # Display in 10ms units
         return f"{total_seconds}.{milliseconds//10:02d}"
 
+    # Set appropriate major and minor ticks
     for ax in axes:
         ax.xaxis.set_major_formatter(FuncFormatter(format_time))
-        # 设置合适的主刻度和次刻度
+        # Set appropriate major and minor ticks
         time_range = df['relative_time'].max() - df['relative_time'].min()
-        if time_range < 1:  # 小于1秒
-            ax.xaxis.set_major_locator(MultipleLocator(0.1))  # 每0.1秒一个主刻度
-        elif time_range < 10:  # 1-10秒
-            ax.xaxis.set_major_locator(MultipleLocator(0.5))  # 每0.5秒一个主刻度
-        elif time_range < 60:  # 小于1分钟
-            ax.xaxis.set_major_locator(MultipleLocator(0.5))  # 每0.5秒一个主刻度
-        else:  # 大于1分钟
-            ax.xaxis.set_major_locator(MultipleLocator(2))  # 每2秒一个主刻度，大范围时保持更低密度
+        if time_range < 1:  # Less than 1 second
+            ax.xaxis.set_major_locator(MultipleLocator(0.1))  # One major tick every 0.1 seconds
+        elif time_range < 10:  # 1-10 seconds
+            ax.xaxis.set_major_locator(MultipleLocator(0.5))  # One major tick every 0.5 seconds
+        elif time_range < 60:  # Less than 1 minute
+            ax.xaxis.set_major_locator(MultipleLocator(0.5))  # One major tick every 0.5 seconds
+        else:  # More than 1 minute
+            ax.xaxis.set_major_locator(MultipleLocator(2))  # One major tick every 2 seconds for larger ranges
 
-        # 设置横轴标签倾斜45度
+        # Rotate x-axis labels 45 degrees
         for label in ax.get_xticklabels():
             label.set_rotation(45)
-            label.set_ha('right')  # 水平对齐方式为右对齐
+            label.set_ha('right')  # Horizontal alignment is right-aligned
 
         ax.set_xlim(df['relative_time'].min(), df['relative_time'].max())
 
@@ -355,13 +356,46 @@ def crop_zero_utilization(df, margin=5):
     # Crop the data
     return df.iloc[start_idx:end_idx+1].reset_index(drop=True)
 
+def collect_statistics(df, csv_filename):
+    """Collect statistics for each metric into a dictionary"""
+    stats_dict = {'filename': os.path.basename(csv_filename)}
+
+    # Use warnings to filter empty data calculation warnings
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+
+        # Collect statistics for each metric
+        for col in df.columns:
+            if col not in ['timestamp', 'relative_time']:
+                try:
+                    # Get more accurate statistics, only considering data points where GPU utilization is greater than 0
+                    filtered_stats = get_filtered_stats(df, col)
+                    if filtered_stats:
+                        mean_val, median_val, min_val, max_val = filtered_stats
+                        stats_dict[f"{col}_mean"] = mean_val
+                        stats_dict[f"{col}_median"] = median_val
+                        stats_dict[f"{col}_min"] = min_val
+                        stats_dict[f"{col}_max"] = max_val
+                except Exception as e:
+                    print(f"  Error collecting statistics for {col}: {e}")
+
+    return stats_dict
+
 def process_csv_file(csv_path, output=None, show=False, title='', crop=True, margin=10):
     """Process single CSV file and generate chart"""
-    # If no output file is specified, use the same directory and base filename by default
+    # If no output file is specified, create png subdirectory in CSV directory by default
     if not output and not show:
         base_name = os.path.splitext(os.path.basename(csv_path))[0]
         output_dir = os.path.dirname(csv_path)
-        output = os.path.join(output_dir, f"{base_name}.png")
+
+        # Create png subdirectory
+        png_dir = os.path.join(output_dir, "png")
+        if not os.path.exists(png_dir):
+            os.makedirs(png_dir)
+            print(f"Created directory: {png_dir}")
+
+        output = os.path.join(png_dir, f"{base_name}.png")
 
     # Read data
     df, comments = read_gpu_metrics(csv_path)
@@ -376,6 +410,9 @@ def process_csv_file(csv_path, output=None, show=False, title='', crop=True, mar
     # Output some statistics
     print(f"Read {len(df)} records")
     print("Statistics:")
+
+    # 收集统计信息
+    stats_dict = collect_statistics(df, csv_path)
 
     # Suppress warnings for mean calculation on empty slices
     import warnings
@@ -404,7 +441,31 @@ def process_csv_file(csv_path, output=None, show=False, title='', crop=True, mar
     for comment in comments:
         print(f"  {comment}")
 
-    return output
+    return output, stats_dict
+
+def save_stats_to_csv(stats_list, folder_path):
+    """Save collected statistics to a CSV file"""
+    if not stats_list:
+        print("No statistics to save")
+        return None
+
+    # Create DataFrame
+    stats_df = pd.DataFrame(stats_list)
+
+    # Sort column names to maintain consistent order
+    cols = ['filename']
+    metric_cols = [col for col in stats_df.columns if col != 'filename']
+    metric_cols.sort()
+    cols.extend(metric_cols)
+
+    # Reorder columns
+    stats_df = stats_df[cols]
+
+    # Save to CSV file
+    stats_file = os.path.join(folder_path, "summary_statistics.csv")
+    stats_df.to_csv(stats_file, index=False)
+    print(f"\nStatistics summary saved to: {stats_file}")
+    return stats_file
 
 def main():
     parser = argparse.ArgumentParser(description='Visualize GPU monitoring data')
@@ -420,7 +481,12 @@ def main():
     # Check if input path is a file or folder
     if os.path.isfile(args.input_path):
         # Process single file
-        process_csv_file(args.input_path, args.output, args.show, args.title, args.crop, args.margin)
+        output_file, stats = process_csv_file(args.input_path, args.output, args.show, args.title, args.crop, args.margin)
+
+        # 如果是单个文件，也保存统计信息
+        if stats:
+            save_stats_to_csv([stats], os.path.dirname(args.input_path))
+
     elif os.path.isdir(args.input_path):
         # Process all CSV files in the folder
         print(f"Scanning folder: {args.input_path}")
@@ -432,20 +498,23 @@ def main():
 
         print(f"Found {len(csv_files)} CSV files")
         processed_files = []
+        all_stats = []  # 收集所有统计信息
 
         for csv_file in csv_files:
             csv_path = os.path.join(args.input_path, csv_file)
             print(f"\nProcessing file: {csv_file}")
             try:
-                output_file = process_csv_file(csv_path, None, args.show, args.title, args.crop, args.margin)
+                output_file, stats = process_csv_file(csv_path, None, args.show, args.title, args.crop, args.margin)
                 processed_files.append((csv_file, output_file))
+                if stats:
+                    all_stats.append(stats)
             except Exception as e:
                 print(f"Error processing {csv_file}: {e}")
 
-        # Print processing summary
-        print("\nProcessing summary:")
-        for csv_file, output_file in processed_files:
-            print(f"  {csv_file} -> {os.path.basename(output_file)}")
+        # 保存汇总统计信息
+        if all_stats:
+            save_stats_to_csv(all_stats, args.input_path)
+
     else:
         print(f"Error: Input path '{args.input_path}' does not exist!")
 
