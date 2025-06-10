@@ -51,6 +51,19 @@ def initialize_nvml():
         print(f"NVML initialization failed: {err}")
         return False
 
+def find_closest_supported_clock(requested_freq, supported_clocks):
+    """Find the closest supported clock frequency to the requested frequency."""
+    if requested_freq in supported_clocks:
+        return requested_freq
+    closest_freq = supported_clocks[0]
+    min_diff = abs(closest_freq - requested_freq)
+    for clock in supported_clocks:
+        diff = abs(clock - requested_freq)
+        if diff < min_diff:
+            min_diff = diff
+            closest_freq = clock
+    return closest_freq
+
 def set_gpu_frequency(gpu_id, frequency_str):
     """Set GPU frequency (graphics clock) to the specified value in MHz
 
@@ -93,29 +106,19 @@ def set_gpu_frequency(gpu_id, frequency_str):
             return False, "No valid frequencies provided after parsing or only -1 provided (will run with default frequency)"
 
         # Find closest supported graphics clock to any of the requested frequencies
-        # 修复查找最接近请求频率的算法
         requested_freq = int(frequency_str) if frequency_str.isdigit() else int(frequency_list[0])
+        closest_freq = find_closest_supported_clock(requested_freq, graphics_clocks)
 
-        # 如果请求的频率在支持列表中，直接使用它
-        if requested_freq in graphics_clocks:
-            closest_freq = requested_freq
+        if closest_freq == requested_freq:
             print(f"Requested frequency {requested_freq} MHz is directly supported")
         else:
-            # 否则找到最接近的支持频率
-            closest_freq = graphics_clocks[0]
-            min_diff = abs(closest_freq - requested_freq)
-
-            for clock in graphics_clocks:
-                diff = abs(clock - requested_freq)
-                if diff < min_diff:
-                    min_diff = diff
-                    closest_freq = clock
             print(f"Requested frequency {requested_freq} MHz is not directly supported, using closest: {closest_freq} MHz")
 
         print(f"Setting GPU {gpu_id} frequency to {closest_freq} MHz (requested {frequency_str})")
 
         # Set the application clocks
         pynvml.nvmlDeviceSetApplicationsClocks(handle, closest_mem_clock, closest_freq)
+        return True, f"Successfully set GPU {gpu_id} frequency to {closest_freq} MHz (requested {frequency_str})"
     except pynvml.NVMLError as err:
         return False, f"Failed to set GPU frequency: {err}"
 
