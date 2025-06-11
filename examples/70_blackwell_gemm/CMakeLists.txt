@@ -45,6 +45,18 @@ cutlass_example_add_executable(
 )
 
 cutlass_example_add_executable(
+  70_blackwell_fp16_gemm_load_once
+  70_blackwell_fp16_gemm.cu
+  TEST_COMMAND_OPTIONS
+  TEST_SWIZZLE_1
+  TEST_SWIZZLE_2
+  TEST_SWIZZLE_5
+  TEST_SWIZZLE_5_UNEVEN
+)
+target_compile_definitions(70_blackwell_fp16_gemm_load_once
+  PRIVATE CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1)
+
+cutlass_example_add_executable(
   70_blackwell_fp8_gemm
   70_blackwell_fp8_gemm.cu
   TEST_COMMAND_OPTIONS
