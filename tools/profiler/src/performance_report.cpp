@@ -325,6 +325,7 @@ std::ostream & PerformanceReport::print_result_pretty_(
       << "         Runtime: " << result.runtime << "  ms\n"
       << "          Memory: " << result.gbytes_per_sec() << " GiB/s\n"
       << "\n            Math: " << result.gflops_per_sec() << " GFLOP/s\n";
+      << "            Math: " << result.gflops_per_sec()/1000.0 << " TFLOP/s\n";
 
   }
 
