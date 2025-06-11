@@ -58,6 +58,7 @@
 
 
 #include <iostream>
+#include <chrono>
 
 #include "cutlass/cutlass.h"
 
@@ -101,8 +102,8 @@ using         LayoutB     = cutlass::layout::ColumnMajor;                   // L
 constexpr int AlignmentB  = 128 / cutlass::sizeof_bits<ElementB>::value;    // Memory access granularity/alignment of B matrix in units of elements (up to 16 bytes)
 
 // C/D matrix configuration
-using         ElementC    = float;                                          // Element type for C and D matrix operands
-using         LayoutC     = cutlass::layout::ColumnMajor;                   // Layout type for C and D matrix operands
+using         ElementC    = half_t;                                          // Element type for C and D matrix operands
+using         LayoutC     = cutlass::layout::RowMajor;                   // Layout type for C and D matrix operands
 constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<ElementC>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
 
 // Kernel functional config
@@ -112,9 +113,9 @@ using OperatorClass       = cutlass::arch::OpClassTensorOp;                 // O
 
 // MMA and Cluster Tile Shapes
 // Shape of the tile computed by tcgen05 MMA, could be across 2 SMs if Cluster Shape %2 == 0 
-using MmaTileShape_MNK = Shape<_256,_128,_64>;                          
+using MmaTileShape_MNK = Shape<_256,_256,_64>;
 // Shape of the threadblocks in a cluster
-using ClusterShape_MNK = Shape<_2,_2,_1>;
+using ClusterShape_MNK = Shape<_2,_1,_1>;
 
 // Build the epilogue
 using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
@@ -198,9 +199,9 @@ struct Options {
 
   Options():
     help(false),
-    m(8192), n(8192), k(8192),
+    m(16384), n(16384), k(16384),
     alpha(1.f), beta(0.f),
-    iterations(10),
+    iterations(100),
     swizzle(0)
   { }
 
@@ -300,6 +301,9 @@ bool initialize_block(
     scope_min = Element(-8);
   }
 
+  scope_max = Element(5);
+  scope_min = Element(-5);
+
   cutlass::reference::device::BlockFillRandomUniform(
     block.get(), block.size(), seed, scope_max, scope_min, 0);
 
@@ -323,6 +327,58 @@ void initialize(const Options &options) {
   initialize_block(block_A, seed + 2023);
   initialize_block(block_B, seed + 2022);
   initialize_block(block_C, seed + 2021);
+
+  std::vector<typename Gemm::ElementA> host_A(options.m * options.k);
+  std::vector<typename Gemm::ElementB> host_B(options.k * options.n);
+
+  // Wait for kernel to finish
+  CUDA_CHECK(cudaDeviceSynchronize());
+  block_A.copy_to_host(host_A.data(), host_A.size());
+  block_B.copy_to_host(host_B.data(), host_B.size());
+
+  using DispatchPolicy = typename CollectiveMainloop::DispatchPolicy;
+  using CtaShape_MNK = typename CollectiveMainloop::CtaShape_MNK;
+
+  int tile_m = size<0>(CtaShape_MNK{});
+  int tile_n = size<1>(CtaShape_MNK{});
+  int tile_k = size<2>(CtaShape_MNK{});
+
+  std::cout << "Stages: " << DispatchPolicy::Stages << std::endl;
+  std::cout << "TileShape: " << tile_m << "x" << tile_n << "x" << tile_k << std::endl;
+
+#if HACK_GEMM_WRITE_SLM_ONCE
+  std::cout << "HackLoadG2L: 1" << std::endl;
+#else
+  std::cout << "HackLoadG2L: 0" << std::endl;
+#endif
+
+  for (int m = 0; m < options.m; ++m) {
+    for (int k = 0; k < options.k; ++k) {
+      if (m < tile_m && k < tile_k) continue;
+      host_A[m * options.k + k] = host_A[(m % tile_m) * options.k + (k % tile_k)];
+    }
+  }
+
+  for (int k = 0; k < options.k; ++k) {
+    for (int n = 0; n < options.n; ++n) {
+      if (k < tile_k && n < tile_n) continue;
+      host_B[k * options.n + n] = host_B[(k % tile_k) * options.n + (n % tile_n)];
+    }
+  }
+
+  if (std::is_same<LayoutB, cutlass::layout::ColumnMajor>::value) {
+    std::vector<typename Gemm::ElementB> temp(options.k * options.n);
+    temp = host_B; // Copy the original data
+
+    for (int k = 0; k < options.k; ++k) {
+      for (int n = 0; n < options.n; ++n) {
+        host_B[n * options.k + k] = temp[k * options.n + n];
+      }
+    }
+  }
+
+  block_A.copy_from_host(host_A.data());
+  block_B.copy_from_host(host_B.data());
 }
 
 /// Populates a Gemm::Arguments structure from the given commandline options
@@ -369,6 +425,25 @@ bool verify(const Options &options) {
   // Check if output from CUTLASS kernel and reference kernel are equal or not
   bool passed = cutlass::reference::device::BlockCompareEqual(block_ref_D.get(), block_D.get(), block_D.size());
 
+  if (!passed) {
+    std::vector<typename Gemm::ElementD> host_D(options.m*options.n);
+    std::vector<typename Gemm::ElementD> host_ref_D(options.m*options.n);
+    block_D.copy_to_host(host_D.data(), host_D.size());
+    block_ref_D.copy_to_host(host_ref_D.data(), host_ref_D.size());
+
+    for (int m = 0; m < options.m; ++m) {
+      for (int n = 0; n < options.n; ++n) {
+        if (host_D[m * options.n + n] != host_ref_D[m * options.n + n]) {
+          std::cout << "Mismatch at (" << m << ", " << n << "): "
+                    << "D = " << static_cast<float>(host_D[m * options.n + n])
+                    << ", Ref D = " << static_cast<float>(host_ref_D[m * options.n + n])
+                    << std::endl;
+          break; // Exit inner loop on first mismatch
+        }
+      }
+    }
+  }
+
   return passed;
 }
 
@@ -396,6 +471,22 @@ int run(Options &options)
   // Initialize CUTLASS kernel with arguments and workspace pointer
   CUTLASS_CHECK(gemm.initialize(arguments, workspace.get()));
 
+  auto grid_shape = Gemm::get_grid_shape(gemm.params());
+  std::cout << "GridDims: " << grid_shape.x << "x" << grid_shape.y << "x" << grid_shape.z << std::endl;
+
+  auto get_timestamp = []() {
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+    std::ostringstream timestamp;
+    timestamp << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S")
+              << "." << std::setfill('0') << std::setw(3) << now_ms.count();
+    return timestamp.str();
+  };
+
+  std::cout << "  [" << get_timestamp() << "] Start warmup and correctness check for CUTLASS kernel." << std::endl;
+
   // Correctness / Warmup iteration
   CUTLASS_CHECK(gemm.run());
 
@@ -403,6 +494,7 @@ int run(Options &options)
   Result result;
   result.passed = verify(options);
 
+  std::cout << "  [" << get_timestamp() << "]";
   std::cout << "  Disposition: " << (result.passed ? "Passed" : "Failed") << std::endl;
 
   if (!result.passed) {
@@ -412,6 +504,8 @@ int run(Options &options)
   // Run profiling loop
   if (options.iterations > 0)
   {
+     std::cout << "  [" << get_timestamp() << "] "
+               << "Start profiling CUTLASS kernel for " << options.iterations << " iterations." << std::endl;
     GpuTimer timer;
     timer.start();
     for (int iter = 0; iter < options.iterations; ++iter) {
@@ -425,10 +519,12 @@ int run(Options &options)
     result.avg_runtime_ms = double(elapsed_ms) / double(options.iterations);
     result.gflops = options.gflops(result.avg_runtime_ms / 1000.0);
 
-
+    std::cout << "  [" << get_timestamp() << "] "
+              << "Profiling completed. Results:" << std::endl;
     std::cout << "  Problem Size: " << options.m << 'x' << options.n << 'x' << options.k << std::endl;
     std::cout << "  Avg runtime: " << result.avg_runtime_ms << " ms" << std::endl;
     std::cout << "  GFLOPS: " << result.gflops << std::endl;
+    std::cout << "  TFLOPS: " << result.gflops / 1000.0 << std::endl;
   }
 
   return 0;
