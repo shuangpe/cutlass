@@ -38,6 +38,8 @@
 // CUDA compatible print and printf
 //
 
+#define PRINT(x) cute::print(#x ": "); cute::print(x); cute::print("\n");
+
 namespace cute
 {
 
