@@ -15,7 +15,7 @@ set_gpu_frequency() {
     local gpu_id=$1
     local frequency=$2
 
-    nvidia-smi -i $gpu_id -ac $(nvidia-smi -i $gpu_id --query-gpu=clocks.mem --format=csv,noheader | cut -d' ' -f1),$frequency > /dev/null
+    nvidia-smi --id="$gpu_id" --lock-gpu-clocks="$frequency","$frequency"
 
     if [ $? -eq 0 ]; then
         echo "✓ GPU $gpu_id frequency set to $frequency MHz"
@@ -30,7 +30,7 @@ set_gpu_frequency() {
 reset_gpu_frequency() {
     local gpu_id=$1
 
-    nvidia-smi -i $gpu_id -rac > /dev/null
+    nvidia-smi --reset-gpu-clocks --id="$gpu_id"
 
     if [ $? -eq 0 ]; then
         echo "✓ GPU $gpu_id frequency reset to default"
@@ -160,7 +160,7 @@ echo "All output files will be saved to: $OUTPUT_DIR"
 
 # Create TFLOPS CSV file
 TFLOPS_FILE="$OUTPUT_DIR/tflops.csv"
-echo "Executable,Frequency,TFLOPS" > "$TFLOPS_FILE"
+echo "Executable,Frequency,ProblemSize,Stages,TileShape,GridDims,HackLoadG2L,Disposition,TFLOPS" > "$TFLOPS_FILE"
 echo "Created TFLOPS summary file: $TFLOPS_FILE"
 
 # Run tests for each executable
@@ -203,20 +203,54 @@ for exe in "${EXECUTABLES[@]}"; do
 
         # Run test program
         echo "  🚀 Executing: $exe_name"
-        TFLOPS_VALUE=""
-        # Capture output to extract TFLOPS
         TEST_OUTPUT=$("$exe" $ARGS 2>&1)
 
-        # Display important parts of test output and extract TFLOPS
+        # Extract data from test output
         echo "  📋 Results:"
-        echo "$TEST_OUTPUT" | grep -E "Problem Size:|Avg runtime:|TFLOPS:" | while read line; do
+        PROBLEM_SIZE=""
+        STAGES=""
+        TILE_SHAPE=""
+        GRID_DIMS=""
+        HACK_LOAD_G2L=""
+        TFLOPS_VALUE=""
+        DISPOSITION=""
+
+        # Extract values using regex
+        if [[ $TEST_OUTPUT =~ Stages:\ ([0-9]+) ]]; then
+            STAGES="${BASH_REMATCH[1]}"
+        fi
+
+        if [[ $TEST_OUTPUT =~ TileShape:\ ([0-9x]+) ]]; then
+            TILE_SHAPE="${BASH_REMATCH[1]}"
+        fi
+
+        if [[ $TEST_OUTPUT =~ HackLoadG2L:\ ([0-9]+) ]]; then
+            HACK_LOAD_G2L="${BASH_REMATCH[1]}"
+        fi
+
+        if [[ $TEST_OUTPUT =~ GridDims:\ ([0-9x]+) ]]; then
+            GRID_DIMS="${BASH_REMATCH[1]}"
+        fi
+
+        if [[ $TEST_OUTPUT =~ Problem\ Size:\ ([0-9x]+) ]]; then
+            PROBLEM_SIZE="${BASH_REMATCH[1]}"
+        fi
+
+        if [[ $TEST_OUTPUT =~ TFLOPS:\ ([0-9.]+) ]]; then
+            TFLOPS_VALUE="${BASH_REMATCH[1]}"
+        fi
+
+        if [[ $TEST_OUTPUT =~ Disposition:\ ([A-Za-z]+) ]]; then
+            DISPOSITION="${BASH_REMATCH[1]}"
+        fi
+
+        # Display important parts of test output
+        echo "$TEST_OUTPUT" | grep -E "Problem Size:|Avg runtime:|TFLOPS:|Stages:|TileShape:|GridDims:|HackLoadG2L:|Disposition:" | while read line; do
             echo "     $line"
-            if [[ $line =~ TFLOPS:\ ([0-9.]+) ]]; then
-                TFLOPS_VALUE="${BASH_REMATCH[1]}"
-                # Append to TFLOPS CSV file
-                echo "$exe_name,$freq,$TFLOPS_VALUE" >> "$TFLOPS_FILE"
-            fi
         done
+
+        # Append to TFLOPS CSV file
+        echo "$exe_name,$freq,$PROBLEM_SIZE,$STAGES,$TILE_SHAPE,$GRID_DIMS,$HACK_LOAD_G2L,$DISPOSITION,$TFLOPS_VALUE" >> "$TFLOPS_FILE"
 
         echo "  ✅ Test completed"
 
