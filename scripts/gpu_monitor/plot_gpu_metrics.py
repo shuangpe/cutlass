@@ -2,9 +2,7 @@
 import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from datetime import datetime
-import numpy as np
 import os
 
 def parse_timestamp(timestamp):
@@ -72,12 +70,12 @@ def extract_title_info(comments):
 def get_filtered_stats(df, column, filter_zeros=True):
     """
     Calculate statistics for the specified column, optionally only for periods when GPU utilization is non-zero
-    
+
     Args:
         df: DataFrame containing GPU monitoring data
         column: Column name for which to calculate statistics
         filter_zeros: Whether to only consider periods when GPU utilization is non-zero
-    
+
     Returns:
         (mean, median, min_val, max_val) tuple
     """
@@ -324,11 +322,11 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
 def crop_zero_utilization(df, margin=5):
     """
     Crop continuous periods of zero GPU utilization at the beginning and end, keeping specified number of boundary points
-    
+
     Args:
         df: DataFrame containing GPU monitoring data
         margin: Number of zero-utilization points to keep as margin when cropping
-    
+
     Returns:
         Cropped DataFrame
     """
@@ -467,6 +465,131 @@ def save_stats_to_csv(stats_list, folder_path):
     print(f"\nStatistics summary saved to: {stats_file}")
     return stats_file
 
+def merge_with_tflops_csv(folder_path, all_stats):
+    """
+    Merge GPU monitoring statistics with tflops.csv to generate tflops_full.csv file
+
+    Args:
+        folder_path: Folder path containing tflops.csv
+        all_stats: List of statistics collected from GPU monitoring files
+    """
+    tflops_file = os.path.join(folder_path, "tflops.csv")
+    if not os.path.exists(tflops_file):
+        print(f"tflops.csv file does not exist: {tflops_file}")
+        return
+
+    # Read tflops.csv
+    tflops_df = pd.read_csv(tflops_file)
+    print(f"Read tflops.csv, containing {len(tflops_df)} rows")
+
+    # Prepare statistics data dictionary for merging
+    stats_dict = {}
+    for stat in all_stats:
+        filename = stat['filename']
+
+        # Extract Executable and Frequency information from filename
+        # First, remove the suffix Mhz.csv
+        base_name = filename.replace("Mhz.csv", "")
+
+        # Find the position of the last underscore
+        last_underscore = base_name.rfind('_')
+        if last_underscore == -1:
+            continue
+
+        # The part before is executable, the part after is frequency
+        executable = base_name[:last_underscore]
+        frequency = base_name[last_underscore+1:]
+
+        key = (executable, frequency)
+        stats_dict[key] = stat
+
+    # Create result DataFrame
+    result_df = tflops_df.copy()
+
+    # Determine the order of metrics to add
+    all_metrics = set()
+    for stat in all_stats:
+        for key in stat.keys():
+            if key != 'filename':
+                metric_base = key.rsplit('_', 1)[0]  # Remove _mean, _median etc. suffixes
+                all_metrics.add(metric_base)
+
+    # Define the priority order of metrics
+    priority_metrics = [
+        'gpu_utilization (%)',
+        'power_draw (W)',
+        'sm_clock (MHz)',
+        'temperature (°C)'
+    ]
+
+    # Order metrics by priority
+    ordered_metrics = []
+    # First, add the prioritized metrics (if they exist in the data)
+    for metric in priority_metrics:
+        if metric in all_metrics:
+            ordered_metrics.append(metric)
+            all_metrics.remove(metric)
+
+    # Then, add the remaining metrics (in alphabetical order)
+    ordered_metrics.extend(sorted(all_metrics))
+
+    # Function to convert metric names to camelCase
+    def convert_to_camel_case(metric_name, stat_type):
+        # Extract unit (if any)
+        unit = ""
+        if "(" in metric_name and ")" in metric_name:
+            unit_start = metric_name.find("(")
+            unit_end = metric_name.find(")")
+            unit = metric_name[unit_start:unit_end+1]
+            metric_name = metric_name[:unit_start].strip()
+
+        # Split words and convert to camel case
+        parts = metric_name.replace("_", " ").split()
+        camel_case = "".join(word.capitalize() for word in parts)
+
+        # Add statistical measure
+        camel_case += stat_type.capitalize()
+
+        # Add unit - at the end
+        return camel_case + unit if unit else camel_case
+
+    # Store mapping of old column names to new ones
+    column_mapping = {}
+
+    # Add new columns for each metric - in order: median, mean, max, min
+    for suffix in ['median', 'mean', 'max', 'min']:
+        for metric in ordered_metrics:
+            old_col_name = f"{metric}_{suffix}"
+            new_col_name = convert_to_camel_case(metric, suffix)
+            column_mapping[old_col_name] = new_col_name
+            result_df[old_col_name] = None
+
+    # Fill statistics data
+    for i, row in result_df.iterrows():
+        executable = row['Executable']
+        frequency = row['Frequency']
+        key = (executable, frequency)
+
+        if key in stats_dict:
+            stat = stats_dict[key]
+            # Fill in order: median, mean, max, min
+            for suffix in ['median', 'mean', 'max', 'min']:
+                for metric in ordered_metrics:
+                    col_name = f"{metric}_{suffix}"
+                    metric_key = f"{metric}_{suffix}"
+                    if metric_key in stat:
+                        # Format values to 2 decimal places
+                        result_df.at[i, col_name] = float(f"{stat[metric_key]:.2f}")
+
+    # Rename columns
+    result_df = result_df.rename(columns=column_mapping)
+
+    # Save to tflops_full.csv
+    output_file = os.path.join(folder_path, "tflops_full.csv")
+    result_df.to_csv(output_file, index=False)
+    print(f"Merged data saved to: {output_file}")
+    print(f"Column names converted to camelCase format")
+
 def main():
     parser = argparse.ArgumentParser(description='Visualize GPU monitoring data')
     parser.add_argument('input_path', help='CSV data file or folder containing CSV files')
@@ -490,7 +613,7 @@ def main():
     elif os.path.isdir(args.input_path):
         # Process all CSV files in the folder
         print(f"Scanning folder: {args.input_path}")
-        csv_files = [f for f in os.listdir(args.input_path) if f.lower().endswith('.csv')]
+        csv_files = [f for f in os.listdir(args.input_path) if f.lower().endswith('.csv') and f != "tflops.csv" and f != "tflops_full.csv" and f != "summary_statistics.csv"]
 
         if not csv_files:
             print("No CSV files found!")
@@ -514,6 +637,10 @@ def main():
         # 保存汇总统计信息
         if all_stats:
             save_stats_to_csv(all_stats, args.input_path)
+
+            # 如果目录中存在 tflops.csv 文件，则合并统计信息
+            if os.path.exists(os.path.join(args.input_path, "tflops.csv")):
+                merge_with_tflops_csv(args.input_path, all_stats)
 
     else:
         print(f"Error: Input path '{args.input_path}' does not exist!")
