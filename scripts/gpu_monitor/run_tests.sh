@@ -5,7 +5,7 @@ FREQUENCIES=("oob" "1500" "1305" "1005")
 
 # Default parameters
 GPU_ID=0
-INTERVAL=0.05
+INTERVAL=150  # 默认间隔为150毫秒
 WARMUP=1
 COOLDOWN=1
 ARGS=""
@@ -52,7 +52,7 @@ function show_help {
     echo "  -a, --args         Arguments to pass to the executable"
     echo "  -w, --warmup       Warmup time (seconds) (default: 1)"
     echo "  -c, --cooldown     Cooldown time (seconds) (default: 1)"
-    echo "  -i, --interval     Monitoring sampling interval (seconds) (default: 0.05)"
+    echo "  -i, --interval     Monitoring sampling interval (milliseconds) (default: 150)"
     echo "  -h, --help         Show this help message"
     exit 1
 }
@@ -160,7 +160,7 @@ echo "All output files will be saved to: $OUTPUT_DIR"
 
 # Create TFLOPS CSV file
 TFLOPS_FILE="$OUTPUT_DIR/tflops.csv"
-echo "Executable,Frequency,ProblemSize,Stages,TileShape,GridDims,HackLoadG2L,Disposition,TFLOPS" > "$TFLOPS_FILE"
+echo "Executable,Frequency,ProblemSize,Stages,TileShape,GridDims,HackLoadG2L,Disposition,TFLOPS,Iterations" > "$TFLOPS_FILE"
 echo "Created TFLOPS summary file: $TFLOPS_FILE"
 
 # Run tests for each executable
@@ -177,29 +177,28 @@ for exe in "${EXECUTABLES[@]}"; do
         # Frequency setting
         if [ "$freq" = "oob" ]; then
             echo "> Running with default GPU frequency"
-            freq_suffix="oobMhz"
+            freq_suffix="oob"
             # Reset GPU frequency to default
             reset_gpu_frequency $GPU_ID
         else
             echo "> Running with GPU frequency: $freq MHz"
-            freq_suffix="${freq}Mhz"
+            freq_suffix="${freq}"
             # Set GPU frequency
             set_gpu_frequency $GPU_ID $freq
         fi
 
         # Create output file
-        output_file="$OUTPUT_DIR/${exe_name%.*}_${freq_suffix}.csv"
+        output_file="$OUTPUT_DIR/${exe_name%.*}_${freq_suffix}.log.txt"
 
-        # Start GPU monitoring using path relative to this script
-        SCRIPT_DIR="$(dirname "$0")"
-        python3 "${SCRIPT_DIR}/gpu_monitor.py" -g $GPU_ID -i $INTERVAL -o $output_file > /dev/null 2>&1 &
+        # Start GPU monitoring with better timing control
+        echo "  📊 Starting GPU monitoring..."
+        nvidia-smi -i $GPU_ID -q -a --loop-ms=$INTERVAL | grep -v -e{Fan,N/A,JPEG,OFA} > "$output_file" &
         MONITOR_PID=$!
 
-        # Wait for monitoring script to start
-        sleep 1
-
-        # Wait for warmup time
-        sleep $WARMUP
+        # 合并监控稳定和GPU预热为单一等待阶段
+        TOTAL_WARMUP=$((WARMUP + 3))  # 原来的3秒稳定时间 + 用户指定的预热时间
+        echo "  🔄 Waiting for monitoring to stabilize and warming up GPU for $TOTAL_WARMUP seconds..."
+        sleep $TOTAL_WARMUP
 
         # Run test program
         echo "  🚀 Executing: $exe_name"
@@ -214,6 +213,7 @@ for exe in "${EXECUTABLES[@]}"; do
         HACK_LOAD_G2L=""
         TFLOPS_VALUE=""
         DISPOSITION=""
+        ITERATIONS=""
 
         # Extract values using regex
         if [[ $TEST_OUTPUT =~ Stages:\ ([0-9]+) ]]; then
@@ -243,6 +243,12 @@ for exe in "${EXECUTABLES[@]}"; do
         if [[ $TEST_OUTPUT =~ Disposition:\ ([A-Za-z]+) ]]; then
             DISPOSITION="${BASH_REMATCH[1]}"
         fi
+        
+        # Extract iterations count
+        if [[ $TEST_OUTPUT =~ Start\ profiling\ CUTLASS\ kernel\ for\ ([0-9]+)\ iterations ]]; then
+            ITERATIONS="${BASH_REMATCH[1]}"
+            echo "     Iterations: $ITERATIONS"
+        fi
 
         # Display important parts of test output
         echo "$TEST_OUTPUT" | grep -E "Problem Size:|Avg runtime:|TFLOPS:|Stages:|TileShape:|GridDims:|HackLoadG2L:|Disposition:" | while read line; do
@@ -250,11 +256,12 @@ for exe in "${EXECUTABLES[@]}"; do
         done
 
         # Append to TFLOPS CSV file
-        echo "$exe_name,$freq,$PROBLEM_SIZE,$STAGES,$TILE_SHAPE,$GRID_DIMS,$HACK_LOAD_G2L,$DISPOSITION,$TFLOPS_VALUE" >> "$TFLOPS_FILE"
+        echo "$exe_name,$freq,$PROBLEM_SIZE,$STAGES,$TILE_SHAPE,$GRID_DIMS,$HACK_LOAD_G2L,$DISPOSITION,$TFLOPS_VALUE,$ITERATIONS" >> "$TFLOPS_FILE"
 
         echo "  ✅ Test completed"
 
-        # Wait for cooldown time
+        # Wait for cooldown time and capture post-execution metrics
+        echo "  📉 Cooling down and capturing post-execution metrics for $COOLDOWN seconds..."
         sleep $COOLDOWN
 
         # Terminate monitoring process
