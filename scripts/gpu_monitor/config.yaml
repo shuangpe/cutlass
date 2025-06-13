@@ -1,0 +1,14 @@
+# GPU Monitor Configuration
+
+# Test parameters
+gpu_id: 0
+executable: ""
+args: "--iterations=1000"
+interval: 150
+
+# GPU frequency settings
+frequencies:
+  - "oob"
+  - 1500
+  - 1305
+  - 1005

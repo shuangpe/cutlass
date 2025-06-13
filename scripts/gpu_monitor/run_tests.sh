@@ -1,14 +1,35 @@
 #!/bin/bash
 
-# Hardcoded GPU frequency settings
-FREQUENCIES=("oob" "1500" "1305" "1005")
+# Extract script directory path
+SCRIPT_DIR=$(dirname "$0")
+PARSER_ROOT="$SCRIPT_DIR/parsers"
 
-# Default parameters
-GPU_ID=0
-INTERVAL=150  # 默认间隔为150毫秒
-WARMUP=1
-COOLDOWN=1
-ARGS=""
+# Fixed internal parameters (not exposed to users)
+WARMUP=3
+COOLDOWN=5
+
+for arg in "$@"; do
+    if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+        python3 $PARSER_ROOT/parse_options.py "$@"
+        exit 0
+    fi
+done
+
+CONFIG_JSON=$(python3 $PARSER_ROOT/parse_options.py "$@")
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
+    echo $CONFIG_JSON
+    exit 1
+fi
+
+# Extract configuration values from JSON
+EXECUTABLE=$(echo "$CONFIG_JSON" | python3 -c "import sys, json; print(json.load(sys.stdin)['executable'])")
+GPU_ID=$(echo "$CONFIG_JSON" | python3 -c "import sys, json; print(json.load(sys.stdin)['gpu_id'])")
+INTERVAL=$(echo "$CONFIG_JSON" | python3 -c "import sys, json; print(json.load(sys.stdin)['interval'])")
+ARGS=$(echo "$CONFIG_JSON" | python3 -c "import sys, json; print(json.load(sys.stdin)['args'])")
+FREQUENCIES=$(echo "$CONFIG_JSON" | python3 -c "import sys, json; print(' '.join(map(str, json.load(sys.stdin)['frequencies'])))")
+FREQUENCIES=($FREQUENCIES)  # Convert to array
 
 # Set GPU frequency
 set_gpu_frequency() {
@@ -40,71 +61,6 @@ reset_gpu_frequency() {
         return 1
     fi
 }
-
-# Help information
-function show_help {
-    echo "Run tests and monitor GPU metrics"
-    echo "Usage: $0 -e EXECUTABLE -g GPU_ID [-a ARGS] [-w WARMUP] [-c COOLDOWN] [-i INTERVAL]"
-    echo ""
-    echo "Options:"
-    echo "  -e, --executable   Test executable or directory"
-    echo "  -g, --gpu          GPU ID"
-    echo "  -a, --args         Arguments to pass to the executable"
-    echo "  -w, --warmup       Warmup time (seconds) (default: 1)"
-    echo "  -c, --cooldown     Cooldown time (seconds) (default: 1)"
-    echo "  -i, --interval     Monitoring sampling interval (milliseconds) (default: 150)"
-    echo "  -h, --help         Show this help message"
-    exit 1
-}
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    key="$1"
-    case $key in
-        -e|--executable)
-            EXECUTABLE="$2"
-            shift 2
-            ;;
-        -g|--gpu)
-            GPU_ID="$2"
-            shift 2
-            ;;
-        -a|--args)
-            ARGS="$2"
-            shift 2
-            ;;
-        -w|--warmup)
-            WARMUP="$2"
-            shift 2
-            ;;
-        -c|--cooldown)
-            COOLDOWN="$2"
-            shift 2
-            ;;
-        -i|--interval)
-            INTERVAL="$2"
-            shift 2
-            ;;
-        -h|--help)
-            show_help
-            ;;
-        *)
-            echo "Unknown option: $1"
-            show_help
-            ;;
-    esac
-done
-
-# Check required parameters
-if [ -z "$EXECUTABLE" ]; then
-    echo "Error: Must specify executable or directory (-e)"
-    show_help
-fi
-
-if [ -z "$GPU_ID" ]; then
-    echo "Error: Must specify GPU ID (-g)"
-    show_help
-fi
 
 # Determine executables list and output directory
 EXECUTABLES=()
@@ -158,16 +114,25 @@ fi
 mkdir -p "$OUTPUT_DIR"
 echo "All output files will be saved to: $OUTPUT_DIR"
 
-# Create TFLOPS CSV file
-TFLOPS_FILE="$OUTPUT_DIR/tflops.csv"
-echo "Executable,Frequency,ProblemSize,Stages,TileShape,GridDims,HackLoadG2L,Disposition,TFLOPS,Iterations" > "$TFLOPS_FILE"
-echo "Created TFLOPS summary file: $TFLOPS_FILE"
+# Initialize the CSV file with headers from both parsers
+RESULTS_FILE="$OUTPUT_DIR/test_results.csv"
+echo -n "Executable,Frequency," > "$RESULTS_FILE"
+
+# Get headers from parse_console_log.py
+CONSOLE_HEADERS=$(python3 $PARSER_ROOT/parse_console_log.py --csv-headers)
+echo -n "$CONSOLE_HEADERS," >> "$RESULTS_FILE"
+
+# Get headers from parse_nvsim_log.py (only median stats type)
+NVSMI_HEADERS=$(python3 $PARSER_ROOT/parse_nvsim_log.py --csv-headers --stats-type median)
+echo "$NVSMI_HEADERS" >> "$RESULTS_FILE"
+
+echo "Created results file: $RESULTS_FILE"
 
 # Run tests for each executable
 for exe in "${EXECUTABLES[@]}"; do
-    exe_name=$(basename "$exe")
+    EXE_NAME=$(basename "$exe")
     echo -e "\n$(printf '%0.s#' {1..80})"
-    echo "# Testing: $exe_name"
+    echo "# Testing: $EXE_NAME"
     echo "$(printf '%0.s#' {1..80})"
 
     # Test with each frequency
@@ -177,88 +142,42 @@ for exe in "${EXECUTABLES[@]}"; do
         # Frequency setting
         if [ "$freq" = "oob" ]; then
             echo "> Running with default GPU frequency"
-            freq_suffix="oob"
+            FREQ_SUFFIX="oob"
             # Reset GPU frequency to default
             reset_gpu_frequency $GPU_ID
         else
             echo "> Running with GPU frequency: $freq MHz"
-            freq_suffix="${freq}"
+            FREQ_SUFFIX="${freq}"
             # Set GPU frequency
             set_gpu_frequency $GPU_ID $freq
         fi
 
-        # Create output file
-        output_file="$OUTPUT_DIR/${exe_name%.*}_${freq_suffix}.log.txt"
+        # Create output file for GPU monitoring
+        NVSMI_FILE="$OUTPUT_DIR/${EXE_NAME%.*}_${FREQ_SUFFIX}.log.txt"
 
         # Start GPU monitoring with better timing control
         echo "  📊 Starting GPU monitoring..."
-        nvidia-smi -i $GPU_ID -q -a --loop-ms=$INTERVAL | grep -v -e{Fan,N/A,JPEG,OFA} > "$output_file" &
+        nvidia-smi -i $GPU_ID -q -a --loop-ms=$INTERVAL | grep -v -e{Fan,N/A,JPEG,OFA} > "$NVSMI_FILE" &
         MONITOR_PID=$!
 
-        # 合并监控稳定和GPU预热为单一等待阶段
-        TOTAL_WARMUP=$((WARMUP + 3))  # 原来的3秒稳定时间 + 用户指定的预热时间
-        echo "  🔄 Waiting for monitoring to stabilize and warming up GPU for $TOTAL_WARMUP seconds..."
-        sleep $TOTAL_WARMUP
+        echo "  🔄 Waiting for monitoring to stabilize and warming up GPU for $WARMUP seconds..."
+        sleep $WARMUP
 
         # Run test program
-        echo "  🚀 Executing: $exe_name"
+        echo "  🚀 Executing: $EXE_NAME"
         TEST_OUTPUT=$("$exe" $ARGS 2>&1)
 
-        # Extract data from test output
+        # Extract data from test output using Python parser
         echo "  📋 Results:"
-        PROBLEM_SIZE=""
-        STAGES=""
-        TILE_SHAPE=""
-        GRID_DIMS=""
-        HACK_LOAD_G2L=""
-        TFLOPS_VALUE=""
-        DISPOSITION=""
-        ITERATIONS=""
 
-        # Extract values using regex
-        if [[ $TEST_OUTPUT =~ Stages:\ ([0-9]+) ]]; then
-            STAGES="${BASH_REMATCH[1]}"
-        fi
-
-        if [[ $TEST_OUTPUT =~ TileShape:\ ([0-9x]+) ]]; then
-            TILE_SHAPE="${BASH_REMATCH[1]}"
-        fi
-
-        if [[ $TEST_OUTPUT =~ HackLoadG2L:\ ([0-9]+) ]]; then
-            HACK_LOAD_G2L="${BASH_REMATCH[1]}"
-        fi
-
-        if [[ $TEST_OUTPUT =~ GridDims:\ ([0-9x]+) ]]; then
-            GRID_DIMS="${BASH_REMATCH[1]}"
-        fi
-
-        if [[ $TEST_OUTPUT =~ Problem\ Size:\ ([0-9x]+) ]]; then
-            PROBLEM_SIZE="${BASH_REMATCH[1]}"
-        fi
-
-        if [[ $TEST_OUTPUT =~ TFLOPS:\ ([0-9.]+) ]]; then
-            TFLOPS_VALUE="${BASH_REMATCH[1]}"
-        fi
-
-        if [[ $TEST_OUTPUT =~ Disposition:\ ([A-Za-z]+) ]]; then
-            DISPOSITION="${BASH_REMATCH[1]}"
-        fi
-        
-        # Extract iterations count
-        if [[ $TEST_OUTPUT =~ Start\ profiling\ CUTLASS\ kernel\ for\ ([0-9]+)\ iterations ]]; then
-            ITERATIONS="${BASH_REMATCH[1]}"
-            echo "     Iterations: $ITERATIONS"
-        fi
+        # Save test output to temporary file
+        TMP_OUTPUT_FILE=$(mktemp)
+        echo "$TEST_OUTPUT" > "$TMP_OUTPUT_FILE"
 
         # Display important parts of test output
         echo "$TEST_OUTPUT" | grep -E "Problem Size:|Avg runtime:|TFLOPS:|Stages:|TileShape:|GridDims:|HackLoadG2L:|Disposition:" | while read line; do
             echo "     $line"
         done
-
-        # Append to TFLOPS CSV file
-        echo "$exe_name,$freq,$PROBLEM_SIZE,$STAGES,$TILE_SHAPE,$GRID_DIMS,$HACK_LOAD_G2L,$DISPOSITION,$TFLOPS_VALUE,$ITERATIONS" >> "$TFLOPS_FILE"
-
-        echo "  ✅ Test completed"
 
         # Wait for cooldown time and capture post-execution metrics
         echo "  📉 Cooling down and capturing post-execution metrics for $COOLDOWN seconds..."
@@ -269,11 +188,11 @@ for exe in "${EXECUTABLES[@]}"; do
         kill $MONITOR_PID 2>/dev/null
 
         # Wait for monitoring process to complete
-        wait_time=0
+        wait_count=0
         while kill -0 $MONITOR_PID 2>/dev/null; do
             sleep 1
-            ((wait_time++))
-            if [ $wait_time -gt 10 ]; then
+            ((wait_count++))
+            if [ $wait_count -gt 10 ]; then
                 kill -9 $MONITOR_PID 2>/dev/null
                 break
             fi
@@ -283,11 +202,28 @@ for exe in "${EXECUTABLES[@]}"; do
         if [ "$freq" != "oob" ]; then
             reset_gpu_frequency $GPU_ID
         fi
+
+        # Now that the test is complete, process the results
+        echo "  📊 Processing results..."
+
+        # Get console log data in CSV format
+        CONSOLE_DATA=$(python3 $PARSER_ROOT/parse_console_log.py --input "$TMP_OUTPUT_FILE" --format csv)
+
+        # Get nvidia-smi monitoring data in CSV format (only median stats type)
+        NVSMI_DATA=$(python3 $PARSER_ROOT/parse_nvsim_log.py "$NVSMI_FILE" --csv --stats-type median)
+
+        # Combine the results and append to CSV file
+        echo "$EXE_NAME,$freq,$CONSOLE_DATA,$NVSMI_DATA" >> "$RESULTS_FILE"
+
+        # Cleanup temporary file
+        rm -f "$TMP_OUTPUT_FILE"
+
+        echo "  ✅ Test completed and results recorded"
     done
 done
 
 echo -e "\n$(printf '%0.s=' {1..80})"
 echo "✨ All tests completed"
 echo "📊 Results saved in: $OUTPUT_DIR/"
-echo "📈 TFLOPS summary available in: $TFLOPS_FILE"
+echo "📈 Test results summary available in: $RESULTS_FILE"
 exit 0
