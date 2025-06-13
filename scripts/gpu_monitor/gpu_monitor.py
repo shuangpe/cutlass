@@ -89,6 +89,24 @@ def get_gpu_metrics(handle):
         metrics['instantaneous_power'] = pynvml.nvmlDeviceGetInstantaneousPowerUsage(handle) / 1000.0
     except (pynvml.NVMLError, AttributeError) as err:
         metrics['instantaneous_power'] = "N/A"
+        
+    # Get HBM power usage (supported on Ampere and newer GPUs)
+    try:
+        metrics['hbm_power'] = pynvml.nvmlDeviceGetMemorySubsystemPowerUsage(handle) / 1000.0  # Convert to watts
+    except (pynvml.NVMLError, AttributeError) as err:
+        # Try alternative method if available
+        try:
+            # Define the field ID for memory subsystem power if available in the NVML version
+            NVML_FI_DEV_MEMORY_SUBSYSTEM_POWER = 310  # This might vary based on NVML version
+            field_ids = [NVML_FI_DEV_MEMORY_SUBSYSTEM_POWER]
+            field_values = pynvml.nvmlDeviceGetFieldValues(handle, field_ids)
+            
+            if field_values[0].valueType == pynvml.NVML_VALUE_TYPE_UNSIGNED_LONG:
+                metrics['hbm_power'] = field_values[0].value.ulVal / 1000.0
+            else:
+                metrics['hbm_power'] = "N/A"
+        except (pynvml.NVMLError, AttributeError) as inner_err:
+            metrics['hbm_power'] = "N/A"
 
     # Get GPU temperature
     try:
@@ -149,7 +167,8 @@ def monitor_gpu(gpu_id, interval, output_file, system_info):
             "Instantaneous Power": False,
             "SM Clock": False,
             "Memory Clock": False,
-            "Graphics Clock": False
+            "Graphics Clock": False,
+            "HBM Power": False
         }
 
         # Test which metrics are available
@@ -159,23 +178,20 @@ def monitor_gpu(gpu_id, interval, output_file, system_info):
         except (pynvml.NVMLError, AttributeError):
             pass
 
+        # Test for HBM power monitoring capability
         try:
-            pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_SM)
-            capabilities["SM Clock"] = True
-        except pynvml.NVMLError:
-            pass
-
-        try:
-            pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_MEM)
-            capabilities["Memory Clock"] = True
-        except pynvml.NVMLError:
-            pass
-
-        try:
-            pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)
-            capabilities["Graphics Clock"] = True
-        except pynvml.NVMLError:
-            pass
+            pynvml.nvmlDeviceGetMemorySubsystemPowerUsage(handle)
+            capabilities["HBM Power"] = True
+        except (pynvml.NVMLError, AttributeError):
+            try:
+                # Alternative method
+                NVML_FI_DEV_MEMORY_SUBSYSTEM_POWER = 310
+                field_ids = [NVML_FI_DEV_MEMORY_SUBSYSTEM_POWER]
+                field_values = pynvml.nvmlDeviceGetFieldValues(handle, field_ids)
+                if field_values[0].nvmlReturn == pynvml.NVML_SUCCESS:
+                    capabilities["HBM Power"] = True
+            except (pynvml.NVMLError, AttributeError):
+                pass
 
         # Print capability information
         print("GPU Monitoring Capabilities:")
@@ -202,6 +218,9 @@ def monitor_gpu(gpu_id, interval, output_file, system_info):
             for capability, available in capabilities.items():
                 csvfile.write(f"# {capability}: {'Available' if available else 'Not Available'}\n")
 
+            # Write note about HBM power monitoring
+            csvfile.write("# Note: HBM power monitoring is available on Ampere and newer GPU architectures\n")
+            
             # Write note about clock frequencies
             csvfile.write("# Note: Tensor Core does not have separate frequency monitoring; it runs at SM clock frequency\n")
             csvfile.write("# Note: On many NVIDIA GPU architectures, SM clock and Graphics clock report identical values\n")
@@ -211,6 +230,7 @@ def monitor_gpu(gpu_id, interval, output_file, system_info):
                 'timestamp',
                 'power_draw (W)',
                 'instantaneous_power (W)',
+                'hbm_power (W)',
                 'temperature (°C)',
                 'sm_clock (MHz)',
                 'mem_clock (MHz)',
@@ -234,6 +254,7 @@ def monitor_gpu(gpu_id, interval, output_file, system_info):
                         'timestamp': timestamp,
                         'power_draw (W)': metrics['power_draw'],
                         'instantaneous_power (W)': metrics['instantaneous_power'],
+                        'hbm_power (W)': metrics['hbm_power'],
                         'temperature (°C)': metrics['temperature'],
                         'sm_clock (MHz)': metrics['sm_clock'],
                         'mem_clock (MHz)': metrics['mem_clock'],

@@ -188,6 +188,21 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     axes[1].set_title('GPU Power (W)')
     axes[1].plot(df['relative_time'], df['power_draw (W)'], 'g-', label='Power Draw')
 
+    # Add HBM power plot if available
+    has_hbm_power = 'hbm_power (W)' in df.columns and not df['hbm_power (W)'].isna().all()
+    if has_hbm_power:
+        axes[1].plot(df['relative_time'], df['hbm_power (W)'], 'b-', label='HBM Power')
+        
+        # Add HBM power median line
+        hbm_power_filtered = df[df['gpu_utilization (%)'] > 0]['hbm_power (W)']
+        if not hbm_power_filtered.empty:
+            hbm_power_median = hbm_power_filtered.median()
+            line = axes[1].axhline(y=hbm_power_median, linestyle='--', color='lightblue', alpha=0.8)
+            # Add median label on the left
+            axes[1].text(0.01, hbm_power_median, f"{hbm_power_median:.1f}W",
+                        verticalalignment='center', color='blue', fontsize=11,
+                        bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
+
     # Add power median line
     power_filtered = df[df['gpu_utilization (%)'] > 0]['power_draw (W)']
     if not power_filtered.empty:
@@ -207,8 +222,15 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
 
     # Add statistics to power chart
     power_stats = get_stats_text(df['power_draw (W)'], "Power", df, unit="W")
+    stats_text = power_stats
+    
+    # Add HBM power statistics if available
+    if has_hbm_power:
+        hbm_power_stats = get_stats_text(df['hbm_power (W)'], "HBM", df, unit="W")
+        stats_text = f"{power_stats}\n{hbm_power_stats}"
+    
     # Increase font size for statistics text
-    axes[1].text(0.5, 0.08, power_stats, transform=axes[1].transAxes,
+    axes[1].text(0.5, 0.08, stats_text, transform=axes[1].transAxes,
                 fontsize=11, verticalalignment='bottom', horizontalalignment='center',
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
 
