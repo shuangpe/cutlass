@@ -59,6 +59,8 @@
 
 #include <iostream>
 #include <chrono>
+#include <numeric>
+#include <random>
 
 #include "cutlass/cutlass.h"
 
@@ -196,13 +198,15 @@ struct Options {
   int iterations;
   int m, n, k;
   int swizzle;
+  int mask_ratio;
 
   Options():
     help(false),
     m(16384), n(16384), k(16384),
     alpha(1.f), beta(0.f),
-    iterations(100),
-    swizzle(0)
+    iterations(2000),
+    swizzle(0),
+    mask_ratio(0)
   { }
 
   // Parses the command line
@@ -221,6 +225,7 @@ struct Options {
     cmd.get_cmd_line_argument("beta", beta, 0.f);
     cmd.get_cmd_line_argument("iterations", iterations);
     cmd.get_cmd_line_argument("swizzle", swizzle);
+    cmd.get_cmd_line_argument("mask_ratio", mask_ratio, 0);
   }
 
   /// Prints the usage statement.
@@ -236,7 +241,8 @@ struct Options {
       << "  --alpha=<f32>               Epilogue scalar alpha\n"
       << "  --beta=<f32>                Epilogue scalar beta\n\n"
       << "  --swizzle=<int>             Cluster rasterization swizzle\n\n"
-      << "  --iterations=<int>          Number of profiling iterations to perform.\n\n";
+        << "  --mask_ratio=<int>           Percentage of elements to mask (set to zero) in A and B, default 0 (no mask)\n\n"
+        << "  --iterations=<int>          Number of profiling iterations to perform.\n\n";
 
     out
       << "\n\nExamples:\n\n"
@@ -352,6 +358,45 @@ void initialize(const Options &options) {
   std::cout << "HackLoadG2L: 0" << std::endl;
 #endif
 
+  // Mask host_A and host_B if mask_ratio > 0
+  if (options.mask_ratio > 0) {
+    float mask_ratio_f = options.mask_ratio / 100.0f;
+
+    // Only mask the first tile
+    size_t first_tile_size_A = tile_m * tile_k;
+    size_t first_tile_size_B = tile_k * tile_n;
+
+    size_t num_mask_A = static_cast<size_t>(first_tile_size_A * mask_ratio_f);
+    size_t num_mask_B = static_cast<size_t>(first_tile_size_B * mask_ratio_f);
+
+    std::vector<size_t> indices_A(first_tile_size_A);
+    std::vector<size_t> indices_B(first_tile_size_B);
+
+    std::iota(indices_A.begin(), indices_A.end(), 0);
+    std::iota(indices_B.begin(), indices_B.end(), 0);
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(indices_A.begin(), indices_A.end(), g);
+    std::shuffle(indices_B.begin(), indices_B.end(), g);
+
+    // Mask elements in the first tile of A
+    for (size_t i = 0; i < num_mask_A; ++i) {
+      size_t idx = indices_A[i];
+      int m = idx / tile_k;
+      int k = idx % tile_k;
+      host_A[m * options.k + k] = typename Gemm::ElementA(0);
+    }
+
+    // Mask elements in the first tile of B
+    for (size_t i = 0; i < num_mask_B; ++i) {
+      size_t idx = indices_B[i];
+      int k = idx / tile_n;
+      int n = idx % tile_n;
+      host_B[k * options.n + n] = typename Gemm::ElementB(0);
+    }
+  }
+
   for (int m = 0; m < options.m; ++m) {
     for (int k = 0; k < options.k; ++k) {
       if (m < tile_m && k < tile_k) continue;
@@ -426,6 +471,7 @@ bool verify(const Options &options) {
   bool passed = cutlass::reference::device::BlockCompareEqual(block_ref_D.get(), block_D.get(), block_D.size());
 
   if (!passed) {
+    int mismatch_count = 0;
     std::vector<typename Gemm::ElementD> host_D(options.m*options.n);
     std::vector<typename Gemm::ElementD> host_ref_D(options.m*options.n);
     block_D.copy_to_host(host_D.data(), host_D.size());
@@ -441,6 +487,7 @@ bool verify(const Options &options) {
           break; // Exit inner loop on first mismatch
         }
       }
+      if (mismatch_count > 8) break; // Exit outer loop if mismatch found
     }
   }
 
@@ -522,6 +569,7 @@ int run(Options &options)
     std::cout << "  [" << get_timestamp() << "] "
               << "Profiling completed. Results:" << std::endl;
     std::cout << "  Problem Size: " << options.m << 'x' << options.n << 'x' << options.k << std::endl;
+    std::cout << "  MaskRatio: " << options.mask_ratio << "%" << std::endl;
     std::cout << "  Avg runtime: " << result.avg_runtime_ms << " ms" << std::endl;
     std::cout << "  GFLOPS: " << result.gflops << std::endl;
     std::cout << "  TFLOPS: " << result.gflops / 1000.0 << std::endl;
