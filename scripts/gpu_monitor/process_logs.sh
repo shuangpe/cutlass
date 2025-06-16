@@ -20,7 +20,7 @@ PARSER_ROOT="$SCRIPT_DIR/parsers"
 
 # Initialize the CSV file with headers
 RESULTS_FILE="$OUTPUT_DIR/test_results.csv"
-echo -n "Executable,Frequency," > "$RESULTS_FILE"
+echo -n "Executable,Frequency,MaskRatio," > "$RESULTS_FILE"
 
 # Get headers from parse_console_log.py
 CONSOLE_HEADERS=$(python3 $PARSER_ROOT/parse_console_log.py --csv-headers)
@@ -47,15 +47,28 @@ find "$OUTPUT_DIR" -name "*_nvsmi.txt" | sort | while read nvsmi_file; do
 
     echo "Processing logs for: $base_name"
 
-    # Extract app name and frequency from base_name using a simpler approach
-    # Example: "70_blackwell_fp16_gemm_1005" -> app_name="70_blackwell_fp16_gemm", freq="1005"
-    # Example: "70_blackwell_fp16_gemm_load_once_1830" -> app_name="70_blackwell_fp16_gemm_load_once", freq="1830"
+    # Extract app name, frequency and mask from base_name
+    # Example: "70_blackwell_fp16_gemm_1005_mask0" -> app_name="70_blackwell_fp16_gemm", freq="1005", mask="0"
 
-    # 从最后一个下划线分割文件名
-    freq="${base_name##*_}"
-    app_name="${base_name%_$freq}"
+    # Extract mask information from filename
+    if [[ $base_name =~ _mask([0-9]+)$ ]]; then
+        mask="${BASH_REMATCH[1]}"
+        # Remove _mask part to extract frequency
+        base_without_mask="${base_name%_mask$mask}"
 
-    echo "  App: $app_name, Frequency: $freq"
+        # Extract frequency and app name from remaining part
+        freq="${base_without_mask##*_}"
+        app_name="${base_without_mask%_$freq}"
+
+        echo "  App: $app_name, Frequency: $freq, Mask: $mask"
+    else
+        # Old filename format without mask information
+        freq="${base_name##*_}"
+        app_name="${base_name%_$freq}"
+        mask="NA"
+
+        echo "  App: $app_name, Frequency: $freq, Mask: $mask (not specified)"
+    fi
 
     # Get console log data in CSV format
     CONSOLE_DATA=$(python3 $PARSER_ROOT/parse_console_log.py --input "$perf_file" --format csv)
@@ -63,8 +76,17 @@ find "$OUTPUT_DIR" -name "*_nvsmi.txt" | sort | while read nvsmi_file; do
     # Get nvidia-smi monitoring data in CSV format (only median stats type)
     NVSMI_DATA=$(python3 $PARSER_ROOT/parse_nvsim_log.py "$nvsmi_file" --csv)
 
-    # Combine the results and append to CSV file
-    echo "$app_name,$freq,$CONSOLE_DATA,$NVSMI_DATA" >> "$RESULTS_FILE"
+    # Combine the results and append to CSV file - include mask information
+    echo "$app_name,$freq,$mask,$CONSOLE_DATA,$NVSMI_DATA" >> "$RESULTS_FILE"
+
+    # Generate visualization plot from the CSV data
+    CSV_FILE="${nvsmi_file%.txt}.csv"
+    if [ -f "$CSV_FILE" ]; then
+        python3 $PARSER_ROOT/plot_nvsim_metrics.py "$CSV_FILE" > /dev/null 2>&1
+        echo "  ✅ Visualization plot generated"
+    else
+        echo "  ⚠️ CSV file not found, skipping plot generation"
+    fi
 
     echo "  ✅ Processed"
 done

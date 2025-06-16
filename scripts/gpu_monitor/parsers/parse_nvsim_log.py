@@ -130,17 +130,24 @@ def write_to_csv(data, output_file):
 def calculate_stable_mean(values, stability_window=5, stability_threshold=0.05):
     """
     Calculate the mean value during the stable period of the metric.
-    
+
     Args:
         values: List of numeric values
         stability_window: Window size to check for stability (number of consecutive points)
         stability_threshold: Maximum allowed relative change within window to be considered stable
-        
+
+    Raises:
+        ValueError: If stable mean cannot be calculated due to insufficient data points
+                   or inability to find a stable period
+
     Returns:
-        Mean value during the stable period or 'N/A' if no stable period found
+        Mean value during the stable period
     """
-    if not values or len(values) < stability_window * 2:
-        return 'N/A'
+    if not values:
+        raise ValueError(f"Cannot calculate stable mean: Empty input data. Expected at least {stability_window*2} data points, got 0.")
+
+    if len(values) < stability_window * 2:
+        raise ValueError(f"Cannot calculate stable mean: Insufficient data points. Expected at least {stability_window*2} data points, got {len(values)}.")
 
     # Find the maximum value to identify potential stable periods at peak performance
     max_value = max(values)
@@ -190,12 +197,17 @@ def calculate_stable_mean(values, stability_window=5, stability_threshold=0.05):
     if stable_end - stable_start + 1 >= stability_window:
         return np.mean(values[stable_start:stable_end+1])
 
-    return 'N/A'
+    # No stable period found - raise an exception with detailed information
+    raise ValueError(
+        f"Cannot calculate stable mean: No stable period of at least {stability_window} points found. "
+        f"Data may be too volatile (threshold={stability_threshold}). "
+        f"Longest stable sequence found: {stable_end-stable_start+1} points."
+    )
 
 def calculate_statistics(data, field, stats_types=None):
-    """Calculate statistics (median, mean, max, min, mean_stable) for a specific field"""
+    """Calculate statistics (median, mean, max, min, meanStable) for a specific field"""
     if stats_types is None:
-        stats_types = ['median', 'mean', 'max', 'min', 'mean_stable']
+        stats_types = ['meanStable', 'median', 'mean', 'max', 'min']
 
     values = []
     for entry in data:
@@ -217,8 +229,12 @@ def calculate_statistics(data, field, stats_types=None):
         stats['max'] = np.max(values)
     if 'min' in stats_types:
         stats['min'] = np.min(values)
-    if 'mean_stable' in stats_types:
-        stats['mean_stable'] = calculate_stable_mean(values)
+    if 'meanStable' in stats_types:
+        try:
+            stats['meanStable'] = calculate_stable_mean(values)
+        except ValueError as e:
+            print(f"Warning when calculating stable mean for {field}: {str(e)}")
+            stats['meanStable'] = 'N/A'
 
     return stats
 
@@ -244,7 +260,7 @@ def filter_idle_periods(data, utilization_field='GPUUtilization', retain_count=1
     for i, entry in enumerate(data):
         try:
             value = int(entry[utilization_field])
-            if value > max_value:
+            if value >= max_value:
                 max_value = value
                 max_idx = i
         except (ValueError, TypeError):
@@ -288,7 +304,7 @@ def get_csv_headers(metrics=None, stats_types=None):
         ]
 
     if stats_types is None:
-        stats_types = ['median', 'mean', 'max', 'min', 'mean_stable']
+        stats_types = ['meanStable', 'median', 'mean', 'max', 'min']
 
     headers = []
     for stat_type in stats_types:
@@ -316,20 +332,24 @@ def format_stats_as_csv(data, metrics=None, stats_types=None):
         ]
 
     if stats_types is None:
-        stats_types = ['median', 'mean', 'max', 'min', 'mean_stable']
+        stats_types = ['meanStable', 'median', 'mean', 'max', 'min']
 
     csv_values = []
     for stat_type in stats_types:
         for metric in metrics:
-            stats = calculate_statistics(data, metric, [stat_type])
-            value = stats.get(stat_type, 'N/A')
-            if value != 'N/A':
-                # Format as integer if it's a whole number
-                if value == int(value):
-                    csv_values.append(f"{int(value)}")
+            try:
+                stats = calculate_statistics(data, metric, [stat_type])
+                value = stats.get(stat_type, 'N/A')
+                if value != 'N/A':
+                    # Format as integer if it's a whole number
+                    if value == int(value):
+                        csv_values.append(f"{int(value)}")
+                    else:
+                        csv_values.append(f"{value:.2f}")
                 else:
-                    csv_values.append(f"{value:.2f}")
-            else:
+                    csv_values.append('N/A')
+            except Exception as e:
+                print(f"Error calculating {stat_type} for {metric}: {str(e)}")
                 csv_values.append('N/A')
 
     return ','.join(csv_values)
@@ -344,7 +364,7 @@ def print_statistics(data):
 
     print("\nStatistics for key metrics:")
     print("-" * 80)
-    print(f"{'Metric':<20} {'Median':<12} {'Mean':<12} {'Max':<12} {'Min':<12} {'Mean(Stable)':<12}")
+    print(f"{'Metric':<20} {'Mean(Stable)':<12} {'Median':<12} {'Mean':<12} {'Max':<12} {'Min':<12}")
     print("-" * 80)
 
     for metric in metrics:
@@ -356,16 +376,16 @@ def print_statistics(data):
         mean = stats['mean']
         max_val = stats['max']
         min_val = stats['min']
-        mean_stable = stats.get('mean_stable', 'N/A')
+        meanStable = stats.get('meanStable', 'N/A')
 
         # Format each value
         median = f"{int(median)}" if median != 'N/A' and median == int(median) else f"{median:.2f}" if median != 'N/A' else 'N/A'
         mean = f"{int(mean)}" if mean != 'N/A' and mean == int(mean) else f"{mean:.2f}" if mean != 'N/A' else 'N/A'
         max_val = f"{int(max_val)}" if max_val != 'N/A' and max_val == int(max_val) else f"{max_val:.2f}" if max_val != 'N/A' else 'N/A'
         min_val = f"{int(min_val)}" if min_val != 'N/A' and min_val == int(min_val) else f"{min_val:.2f}" if min_val != 'N/A' else 'N/A'
-        mean_stable = f"{int(mean_stable)}" if mean_stable != 'N/A' and mean_stable == int(mean_stable) else f"{mean_stable:.2f}" if mean_stable != 'N/A' else 'N/A'
+        meanStable = f"{int(meanStable)}" if meanStable != 'N/A' and meanStable == int(meanStable) else f"{meanStable:.2f}" if meanStable != 'N/A' else 'N/A'
 
-        print(f"{header:<20} {median:<12} {mean:<12} {max_val:<12} {min_val:<12} {mean_stable:<12}")
+        print(f"{header:<20} {meanStable:<12} {median:<12} {mean:<12} {max_val:<12} {min_val:<12}")
 
     print("-" * 80)
 
@@ -412,8 +432,8 @@ def main():
 
         csv_file = log_file.rsplit('.', 1)[0] + '.csv'
         write_to_csv(parsed_data, csv_file)
-        csv_file = log_file.rsplit('.', 1)[0] + '.filtered.csv'
-        write_to_csv(filtered_data, csv_file)
+        filtered_csv_file = log_file.rsplit('.', 1)[0] + '.filtered.csv'
+        write_to_csv(filtered_data, filtered_csv_file)
 
         # If CSV output mode, only output CSV format data
         if args.csv:
@@ -423,7 +443,8 @@ def main():
             # Print statistics information
             print(f"Parsing file: {log_file}")
             print(f"Original data points: {len(parsed_data)}, After filtering: {len(filtered_data)}")
-            print(f"Data has been written to {csv_file}")
+            print(f"Data has been written to: {csv_file}")
+            print(f"Filtered data has been written to: {filtered_csv_file}")
             print_statistics(filtered_data)
 
 if __name__ == "__main__":

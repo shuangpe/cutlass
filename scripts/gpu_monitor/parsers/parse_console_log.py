@@ -69,7 +69,7 @@ def format_as_csv_row(data, keys=None):
     if keys is None:
         keys = ["problem_size", "stages", "tile_shape", "grid_dims",
                 "hack_load_g2l", "disposition", "tflops", "iterations", 
-                "avg_runtime", "mask_ratio"]  # 添加mask_ratio到默认键列表
+                "avg_runtime"]
 
     # Extract values in the order specified by keys
     values = [data.get(key, "") for key in keys]
@@ -90,7 +90,7 @@ def get_csv_headers(keys=None):
     if keys is None:
         keys = ["problem_size", "stages", "tile_shape", "grid_dims",
                 "hack_load_g2l", "disposition", "tflops", "iterations", 
-                "avg_runtime", "mask_ratio"]  # 添加mask_ratio到默认键列表
+                "avg_runtime"]
 
     # Map internal field names to display names
     field_display_names = {
