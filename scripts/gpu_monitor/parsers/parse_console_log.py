@@ -25,7 +25,8 @@ def parse_test_output(text):
         "tflops": "",
         "disposition": "",
         "iterations": "",
-        "avg_runtime": ""
+        "avg_runtime": "",
+        "mask_ratio": ""
     }
 
     # Define regex patterns for each field
@@ -38,7 +39,8 @@ def parse_test_output(text):
         "tflops": r"TFLOPS:\ ([0-9.]+)",
         "disposition": r"Disposition:\ ([A-Za-z]+)",
         "iterations": r"Start profiling CUTLASS kernel for ([0-9]+) iterations",
-        "avg_runtime": r"Avg runtime: ([0-9.]+) ms"
+        "avg_runtime": r"Avg runtime: ([0-9.]+) ms",
+        "mask_ratio": r"MaskRatio:\ ([0-9.%]+)"
     }
 
     # Extract values using regex
@@ -46,6 +48,10 @@ def parse_test_output(text):
         match = re.search(pattern, text)
         if match:
             result[key] = match.group(1)
+
+    # Set default value "0%" for MaskRatio if not found
+    if result["mask_ratio"] == "":
+        result["mask_ratio"] = "0%"
 
     return result
 
@@ -62,7 +68,8 @@ def format_as_csv_row(data, keys=None):
     """
     if keys is None:
         keys = ["problem_size", "stages", "tile_shape", "grid_dims",
-                "hack_load_g2l", "disposition", "tflops", "iterations"]
+                "hack_load_g2l", "disposition", "tflops", "iterations", 
+                "avg_runtime", "mask_ratio"]  # 添加mask_ratio到默认键列表
 
     # Extract values in the order specified by keys
     values = [data.get(key, "") for key in keys]
@@ -82,7 +89,8 @@ def get_csv_headers(keys=None):
     """
     if keys is None:
         keys = ["problem_size", "stages", "tile_shape", "grid_dims",
-                "hack_load_g2l", "disposition", "tflops", "iterations"]
+                "hack_load_g2l", "disposition", "tflops", "iterations", 
+                "avg_runtime", "mask_ratio"]  # 添加mask_ratio到默认键列表
 
     # Map internal field names to display names
     field_display_names = {
@@ -94,7 +102,8 @@ def get_csv_headers(keys=None):
         "disposition": "Disposition",
         "tflops": "TFLOPS",
         "iterations": "Iterations",
-        "avg_runtime": "AvgRuntime"
+        "avg_runtime": "AvgRuntime",
+        "mask_ratio": "MaskRatio"  # 添加MaskRatio的显示名称
     }
 
     # Get display names for the specified keys
