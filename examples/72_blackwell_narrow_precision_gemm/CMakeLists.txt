@@ -40,7 +40,21 @@ cutlass_example_add_executable(
   )
 
 cutlass_example_add_executable(
-  72c_blackwell_mixed_mxfp8_bf16_gemm
+  72b_blackwell_nvfp4_nvfp4_gemm_load_once
+  72b_blackwell_nvfp4_nvfp4_gemm.cu
+  )
+target_compile_definitions(72b_blackwell_nvfp4_nvfp4_gemm_load_once
+  PRIVATE CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1)
+
+cutlass_example_add_executable(
+  72c_blackwell_mxfp8_fp8_gemm
   72c_blackwell_mixed_mxfp8_bf16_gemm.cu
   )
+
+cutlass_example_add_executable(
+  72c_blackwell_mxfp8_fp8_gemm_load_once
+  72c_blackwell_mixed_mxfp8_bf16_gemm.cu
+  )
+target_compile_definitions(72c_blackwell_mxfp8_fp8_gemm_load_once
+  PRIVATE CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1)
 endif()
