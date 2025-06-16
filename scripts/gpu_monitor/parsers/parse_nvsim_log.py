@@ -127,10 +127,75 @@ def write_to_csv(data, output_file):
         for entry in data:
             writer.writerow(entry)
 
+def calculate_stable_mean(values, stability_window=5, stability_threshold=0.05):
+    """
+    Calculate the mean value during the stable period of the metric.
+    
+    Args:
+        values: List of numeric values
+        stability_window: Window size to check for stability (number of consecutive points)
+        stability_threshold: Maximum allowed relative change within window to be considered stable
+        
+    Returns:
+        Mean value during the stable period or 'N/A' if no stable period found
+    """
+    if not values or len(values) < stability_window * 2:
+        return 'N/A'
+
+    # Find the maximum value to identify potential stable periods at peak performance
+    max_value = max(values)
+    max_index = values.index(max_value)
+
+    # For metrics like power, find stable period around the maximum value
+    # First, find a continuous period where values are close to the maximum
+    stable_start = max_index
+    stable_end = max_index
+
+    # Search backward from max_index to find start of stable period
+    for i in range(max_index, 0, -1):
+        if abs(values[i] - values[i-1]) / max(values[i], 1) > stability_threshold:
+            stable_start = i
+            break
+
+    # Search forward from max_index to find end of stable period
+    for i in range(max_index, len(values)-1):
+        if abs(values[i] - values[i+1]) / max(values[i], 1) > stability_threshold:
+            stable_end = i
+            break
+
+    # If the stable period is too short, try to find the longest stable period
+    if stable_end - stable_start < stability_window:
+        best_stable_len = 0
+        best_stable_start = 0
+        best_stable_end = 0
+
+        i = 0
+        while i < len(values) - 1:
+            j = i + 1
+            while j < len(values) and abs(values[j] - values[j-1]) / max(values[j-1], 1) <= stability_threshold:
+                j += 1
+
+            if j - i > best_stable_len:
+                best_stable_len = j - i
+                best_stable_start = i
+                best_stable_end = j - 1
+
+            i = j
+
+        if best_stable_len >= stability_window:
+            stable_start = best_stable_start
+            stable_end = best_stable_end
+
+    # Calculate mean of the stable period
+    if stable_end - stable_start + 1 >= stability_window:
+        return np.mean(values[stable_start:stable_end+1])
+
+    return 'N/A'
+
 def calculate_statistics(data, field, stats_types=None):
-    """Calculate statistics (median, mean, max, min) for a specific field"""
+    """Calculate statistics (median, mean, max, min, mean_stable) for a specific field"""
     if stats_types is None:
-        stats_types = ['median', 'mean', 'max', 'min']
+        stats_types = ['median', 'mean', 'max', 'min', 'mean_stable']
 
     values = []
     for entry in data:
@@ -152,6 +217,8 @@ def calculate_statistics(data, field, stats_types=None):
         stats['max'] = np.max(values)
     if 'min' in stats_types:
         stats['min'] = np.min(values)
+    if 'mean_stable' in stats_types:
+        stats['mean_stable'] = calculate_stable_mean(values)
 
     return stats
 
@@ -221,7 +288,7 @@ def get_csv_headers(metrics=None, stats_types=None):
         ]
 
     if stats_types is None:
-        stats_types = ['median', 'mean', 'max', 'min']
+        stats_types = ['median', 'mean', 'max', 'min', 'mean_stable']
 
     headers = []
     for stat_type in stats_types:
@@ -249,7 +316,7 @@ def format_stats_as_csv(data, metrics=None, stats_types=None):
         ]
 
     if stats_types is None:
-        stats_types = ['median', 'mean', 'max', 'min']
+        stats_types = ['median', 'mean', 'max', 'min', 'mean_stable']
 
     csv_values = []
     for stat_type in stats_types:
@@ -277,7 +344,7 @@ def print_statistics(data):
 
     print("\nStatistics for key metrics:")
     print("-" * 80)
-    print(f"{'Metric':<20} {'Median':<12} {'Mean':<12} {'Max':<12} {'Min':<12}")
+    print(f"{'Metric':<20} {'Median':<12} {'Mean':<12} {'Max':<12} {'Min':<12} {'Mean(Stable)':<12}")
     print("-" * 80)
 
     for metric in metrics:
@@ -289,14 +356,16 @@ def print_statistics(data):
         mean = stats['mean']
         max_val = stats['max']
         min_val = stats['min']
-        
+        mean_stable = stats.get('mean_stable', 'N/A')
+
         # Format each value
         median = f"{int(median)}" if median != 'N/A' and median == int(median) else f"{median:.2f}" if median != 'N/A' else 'N/A'
         mean = f"{int(mean)}" if mean != 'N/A' and mean == int(mean) else f"{mean:.2f}" if mean != 'N/A' else 'N/A'
         max_val = f"{int(max_val)}" if max_val != 'N/A' and max_val == int(max_val) else f"{max_val:.2f}" if max_val != 'N/A' else 'N/A'
         min_val = f"{int(min_val)}" if min_val != 'N/A' and min_val == int(min_val) else f"{min_val:.2f}" if min_val != 'N/A' else 'N/A'
+        mean_stable = f"{int(mean_stable)}" if mean_stable != 'N/A' and mean_stable == int(mean_stable) else f"{mean_stable:.2f}" if mean_stable != 'N/A' else 'N/A'
 
-        print(f"{header:<20} {median:<12} {mean:<12} {max_val:<12} {min_val:<12}")
+        print(f"{header:<20} {median:<12} {mean:<12} {max_val:<12} {min_val:<12} {mean_stable:<12}")
 
     print("-" * 80)
 
