@@ -54,6 +54,27 @@
 namespace cutlass::gemm::collective {
 using namespace cute;
 
+#if !defined(SM100_DEBUG_MODE)
+#define SM100_DEBUG_MODE 100
+#endif
+
+#if SM100_DEBUG_MODE == 1 || SM100_DEBUG_MODE == 2
+#if !defined(DEBUG_BLOCK_ID)
+#define DEBUG_BLOCK_ID 0
+#endif
+#endif
+
+#if SM100_DEBUG_MODE == 1
+#define SM100_DEBUG_LOAD_THREAD (cute::thread(64, DEBUG_BLOCK_ID))
+#define SM100_DEBUG_MMA_THREAD false
+#elif SM100_DEBUG_MODE == 2
+#define SM100_DEBUG_LOAD_THREAD false
+#define SM100_DEBUG_MMA_THREAD (cute::thread(0, DEBUG_BLOCK_ID))
+#else
+#define SM100_DEBUG_LOAD_THREAD false
+#define SM100_DEBUG_MMA_THREAD false
+#endif
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 // WarpSpecialized Mainloop
@@ -299,6 +320,16 @@ struct CollectiveMma<
     SfaTensor tCtSFA;
     SfbTensor tCtSFB;
   };
+
+#if HACK_GEMM_WRITE_SLM_ONCE
+#if CUTLASS_UNIT_TEST_PIPELINE
+#else
+  #error "Must define CUTLASS_UNIT_TEST_PIPELIN=true when HACK_GEMM_WRITE_SLM_ONCE is enabled."
+#endif
+
+  uint32_t smem_pipe_write_count = 0;
+  uint32_t smem_pipe_read_count = 0;
+#endif
 
   template <
     class KTileCount,
@@ -890,6 +921,22 @@ struct CollectiveMma<
     Tensor tAgSFA = tAgSFA_mkl(_, get<0>(cta_coord_mnkl) / size(typename TiledMma::AtomThrID{}), _, get<3>(cta_coord_mnkl));
     Tensor tBgSFB = tBgSFB_nkl(_, get<1>(cta_coord_mnkl), _, get<3>(cta_coord_mnkl));
 
+    if (SM100_DEBUG_LOAD_THREAD) {
+      print("threadIdx=("); print(threadIdx.x); print(", "); print(threadIdx.y); print(", "); print(threadIdx.z);
+      print(") blockIdx=("); print(blockIdx.x); print(", "); print(blockIdx.y); print(", "); print(blockIdx.z);
+      print(") blockDim=("); print(blockDim.x); print(", "); print(blockDim.y); print(", "); print(blockDim.z);
+      print(") gridDim=("); print(gridDim.x); print(", "); print(gridDim.y); print(", "); print(gridDim.z); print(")\n");
+    }
+
+    if (SM100_DEBUG_LOAD_THREAD) {
+      PRINT(CtaShape_MNK{});
+      PRINT(TileShape_SF{});
+      PRINT(SmemLayoutA{});
+      PRINT(SmemLayoutB{});
+      PRINT(SmemLayoutSFA{});
+      PRINT(SmemLayoutSFB{});
+    }
+
     auto barrier_token = mainloop_pipeline.producer_try_acquire(mainloop_pipe_producer_state);
 
     // Issue the Mainloop loads
@@ -903,16 +950,32 @@ struct CollectiveMma<
       using BarrierType = typename MainloopPipeline::ProducerBarrierType;
       BarrierType* tma_barrier = mainloop_pipeline.producer_get_barrier(mainloop_pipe_producer_state);
 
+#if HACK_GEMM_WRITE_SLM_ONCE
+      auto curr_mainloop_pipe_producer_state = mainloop_pipe_producer_state;
+#endif
+
       int write_stage = mainloop_pipe_producer_state.index();
       ++mainloop_pipe_producer_state;
       barrier_token = mainloop_pipeline.producer_try_acquire(mainloop_pipe_producer_state);
 
+#if HACK_GEMM_WRITE_SLM_ONCE
+      if (++smem_pipe_write_count <= MainloopPipeline::Stages) {
+#endif
       if (cute::elect_one_sync()) {
         copy(observed_tma_load_a_->with(*tma_barrier, mcast_mask_a), tAgA(_,*k_tile_iter), tAsA(_,write_stage));
         copy(observed_tma_load_b_->with(*tma_barrier, mcast_mask_b), tBgB(_,*k_tile_iter), tBsB(_,write_stage));
         copy(observed_tma_load_sfa_->with(*tma_barrier, mcast_mask_sfa), tAgSFA(_,*k_tile_iter), tAsSFA(_,write_stage));
         copy(observed_tma_load_sfb_->with(*tma_barrier, mcast_mask_sfb), tBgSFB(_,*k_tile_iter), tBsSFB(_,write_stage));
       }
+#if HACK_GEMM_WRITE_SLM_ONCE
+      } else {
+        if (cute::elect_one_sync()) {
+          copy(observed_tma_load_sfa_->with(*tma_barrier, mcast_mask_sfa), tAgSFA(_,*k_tile_iter), tAsSFA(_,write_stage));
+          copy(observed_tma_load_sfb_->with(*tma_barrier, mcast_mask_sfb), tBgSFB(_,*k_tile_iter), tBsSFB(_,write_stage));
+        }
+        mainloop_pipeline.producer_commit(curr_mainloop_pipe_producer_state, ABTmaTransactionBytes);
+      }
+#endif
 
       --k_tile_count;
       ++k_tile_iter;

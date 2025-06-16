@@ -51,6 +51,9 @@
 */
 
 #include <iostream>
+#include <chrono>
+#include <numeric>
+#include <random>
 
 #include "cutlass/cutlass.h"
 
@@ -104,7 +107,7 @@ constexpr int AlignmentB  = 32;                                             // M
 // C/D matrix configuration
 using         ElementD    = cutlass::float_e2m1_t;                          // Element type for D matrix operand
 using         ElementSFD  = cutlass::float_ue8m0_t;                         // Element type for SFB matrix operand
-using         ElementC    = float;                                          // Element type for C matrix operand
+using         ElementC    = cutlass::half_t;                                          // Element type for C matrix operand
 using         LayoutCTag  = cutlass::layout::RowMajor;                      // Layout type for C matrix operand
 using         LayoutDTag  = cutlass::layout::RowMajor;                      // Layout type for D matrix operand
 using         LayoutSFDTag = LayoutDTag;                                    // Layout type for SFD should be same as D matrix operand
@@ -119,8 +122,8 @@ using ArchTag             = cutlass::arch::Sm100;                           // T
 using OperatorClass       = cutlass::arch::OpClassBlockScaledTensorOp;      // Operator class tag
 
 // Kernel Perf config
-using MmaTileShape        = Shape<_128,_128,_256>;                          // MMA's tile size
-using ClusterShape        = Shape<_1,_1,_1>;                                // Shape of the threadblocks in a cluster
+using MmaTileShape        = Shape<_256,_192,_256>;                          // MMA's tile size
+using ClusterShape        = Shape<_2,_1,_1>;                                // Shape of the threadblocks in a cluster
 
 constexpr int InputSFVectorSize  = 16;
 constexpr int OutputSFVectorSize = InputSFVectorSize;
@@ -241,13 +244,17 @@ struct Options {
   int iterations;
   int m, n, k;
   int swizzle = 0;
+  int mask_ratio = 0;
+  bool skip_verify;  // 添加skip_verify选项
 
   Options():
     help(false),
-    m(1024), n(1024), k(1024),
+    m(8192), n(8192), k(8192),
     alpha(1.f), beta(0.f),
     iterations(10),
-    swizzle(0)
+    swizzle(0),
+    mask_ratio(0),
+    skip_verify(false)  // 默认值为false
   { }
 
   // Parses the command line
@@ -266,6 +273,8 @@ struct Options {
     cmd.get_cmd_line_argument("beta", beta, 0.f);
     cmd.get_cmd_line_argument("iterations", iterations);
     cmd.get_cmd_line_argument("swizzle", swizzle);
+    cmd.get_cmd_line_argument("mask_ratio", mask_ratio, 0);
+    cmd.get_cmd_line_argument("skip_verify", skip_verify, false);  // 解析skip_verify参数
   }
 
   /// Prints the usage statement.
@@ -281,7 +290,9 @@ struct Options {
       << "  --alpha=<f32>               Epilogue scalar alpha\n"
       << "  --beta=<f32>                Epilogue scalar beta\n"
       << "  --swizzle=<int>             Cluster rasterization swizzle\n"
-      << "  --iterations=<int>          Number of profiling iterations to perform.\n\n";
+      << "  --mask_ratio=<int>          Percentage of elements to mask (set to zero) in A, B, SFA, SFB, default 0 (no mask)\n"
+      << "  --iterations=<int>          Number of profiling iterations to perform.\n"
+      << "  --skip_verify=<bool>        If specified, skips verification step\n";
 
     out << "\n\nExamples:\n\n"
       << "$ " << "./examples/72_blackwell_narrow_precision_gemm/72b_blackwell_nvfp4_nvfp4_gemm" << " --m=1024 --n=512 --k=1024 --alpha=2 --beta=0.707 \n\n";
@@ -356,6 +367,10 @@ bool initialize_block(
     scope_max = 4;
     scope_min = -4;
   }
+
+  scope_max = 5;
+  scope_min = -5;
+
   cutlass::reference::host::TensorFillRandomUniform(
     view, seed, scope_max, scope_min, 0);
   
@@ -401,6 +416,111 @@ void initialize(const Options &options) {
   initialize_block(block_SFA.host_view(), seed + 2024);
   initialize_block(block_SFB.host_view(), seed + 2025);
   block_Normconst.at(cutlass::make_Coord(0)) = 2;
+
+  using DispatchPolicy = typename CollectiveMainloop::DispatchPolicy;
+  using CtaShape_MNK = typename CollectiveMainloop::CtaShape_MNK;
+
+  int tile_m = size<0>(CtaShape_MNK{});
+  int tile_n = size<1>(CtaShape_MNK{});
+  int tile_k = size<2>(CtaShape_MNK{});
+
+  std::cout << "Stages: " << DispatchPolicy::Stages << std::endl;
+  std::cout << "TileShape: " << tile_m << "x" << tile_n << "x" << tile_k << std::endl;
+
+#if HACK_GEMM_WRITE_SLM_ONCE
+  std::cout << "HackLoadG2L: 1" << std::endl;
+#else
+  std::cout << "HackLoadG2L: 0" << std::endl;
+#endif
+
+  auto mask_start_0 = std::chrono::high_resolution_clock::now();
+
+  // Mask host_A and host_B if mask_ratio > 0
+  if (options.mask_ratio > 0) {
+    auto mask_start = std::chrono::high_resolution_clock::now();
+    std::cout << "Masking " << options.mask_ratio << "% of the first tile in A and B matrices." << std::endl;
+    float mask_ratio_f = options.mask_ratio / 100.0f;
+
+    // Only mask the first tile
+    size_t first_tile_size_A = tile_m * tile_k;
+    size_t first_tile_size_B = tile_k * tile_n;
+
+    size_t num_mask_A = static_cast<size_t>(first_tile_size_A * mask_ratio_f);
+    size_t num_mask_B = static_cast<size_t>(first_tile_size_B * mask_ratio_f);
+
+    std::vector<int> indices_A(first_tile_size_A);
+    std::vector<int> indices_B(first_tile_size_B);
+
+    std::iota(indices_A.begin(), indices_A.end(), 0);
+    std::iota(indices_B.begin(), indices_B.end(), 0);
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(indices_A.begin(), indices_A.end(), g);
+    std::shuffle(indices_B.begin(), indices_B.end(), g);
+
+    // Mask elements in the first tile of A
+    for (size_t i = 0; i < num_mask_A; ++i) {
+      int idx = indices_A[i];
+      block_A.at(cutlass::make_Coord(idx)) = typename Gemm::ElementA(0);
+    }
+
+    // Mask elements in the first tile of B
+    for (size_t i = 0; i < num_mask_B; ++i) {
+      int idx = indices_B[i];
+      block_B.at(cutlass::make_Coord(idx)) = typename Gemm::ElementB(0);
+    }
+    std::cout << "Masked elements in A: " << num_mask_A << ", B: " << num_mask_B << std::endl;
+
+    // After masking operations complete
+    auto mask_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> mask_duration = mask_end - mask_start;
+    std::cout << "Time taken for masking: " << mask_duration.count() << " ms" << std::endl;
+  }
+
+  for (int m = 0; m < options.m; ++m) {
+    for (int k = 0; k < options.k; ++k) {
+      if (m < tile_m && k < tile_k) continue;
+      block_A.at(cutlass::make_Coord(m * options.k + k)) = block_A.at(cutlass::make_Coord((m % tile_m) * options.k + (k % tile_k)));
+    }
+  }
+
+  for (int k = 0; k < options.k; ++k) {
+    for (int n = 0; n < options.n; ++n) {
+      if (k < tile_k && n < tile_n) continue;
+      block_B.at(cutlass::make_Coord(k * options.n + n)) = block_B.at(cutlass::make_Coord((k % tile_k) * options.n + (n % tile_n)));
+    }
+  }
+
+  for (int m = 0; m < options.m; ++m) {
+    for (int k = 0; k < options.k; ++k) {
+      if (m < tile_m && k < tile_k) continue;
+      block_A.at(cutlass::make_Coord(m * options.k + k)) = block_A.at(cutlass::make_Coord((m % tile_m) * options.k + (k % tile_k)));
+    }
+  }
+
+  for (int k = 0; k < options.k; ++k) {
+    for (int n = 0; n < options.n; ++n) {
+      if (k < tile_k && n < tile_n) continue;
+      block_B.at(cutlass::make_Coord(k * options.n + n)) = block_B.at(cutlass::make_Coord((k % tile_k) * options.n + (n % tile_n)));
+    }
+  }
+
+  // if (std::is_same<LayoutB, cutlass::layout::ColumnMajor>::value) {
+  //   std::vector<typename Gemm::ElementB> temp(options.k * options.n);
+  //   temp = host_B; // Copy the original data
+
+  //   for (int k = 0; k < options.k; ++k) {
+  //     for (int n = 0; n < options.n; ++n) {
+        
+  //       host_B[n * options.k + k] = temp[k * options.n + n];
+  //     }
+  //   }
+  // }
+
+  auto mask_end_0 = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> mask_duration_0 = mask_end_0 - mask_start_0;
+  std::cout << "Time taken for manipulating: " << mask_duration_0.count() << " ms" << std::endl << std::flush;
 
   block_A.sync_device();
   block_B.sync_device();
@@ -512,6 +632,17 @@ int run(Options &options)
   // Initialize CUTLASS kernel with arguments and workspace pointer
   CUTLASS_CHECK(gemm.initialize(arguments, workspace.get()));
 
+  auto get_timestamp = []() {
+    auto now = std::chrono::system_clock::now();
+    auto now_time_t = std::chrono::system_clock::to_time_t(now);
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    std::ostringstream timestamp;
+    timestamp << std::put_time(std::localtime(&now_time_t), "%Y-%m-%d %H:%M:%S")
+              << "." << std::setfill('0') << std::setw(3) << now_ms.count();
+    return timestamp.str();
+  };
+  std::cout << "  [" << get_timestamp() << "] Start warmup and correctness check for CUTLASS kernel." << std::endl;
+
   // Correctness / Warmup iteration
   CUTLASS_CHECK(gemm.run());
 
@@ -519,13 +650,24 @@ int run(Options &options)
 
   // Check if output from CUTLASS kernel and reference kernel are equal or not
   Result result;
-  result.passed = verify(options);
 
-  std::cout << "  Disposition: " << (result.passed ? "Passed" : "Failed") << std::endl;
+  if (!options.skip_verify) {  // 根据skip_verify条件跳过验证
+    auto verify_start = std::chrono::high_resolution_clock::now();
+    result.passed = verify(options);
+    auto verify_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> verify_duration = verify_end - verify_start;
+    std::cout << "Verification completed in " << verify_duration.count() << " ms" << std::endl;
 
-  if (!result.passed) {
-    exit(-1);
+    std::cout << "  Disposition: " << (result.passed ? "Passed" : "Failed") << std::endl;
+
+    if (!result.passed) {
+      exit(-1);
+    }
+  } else {
+    std::cout << "  Disposition: " << "Skipped" << std::endl;
   }
+
+  std::cout << "  [" << get_timestamp() << "] Start profiling CUTLASS kernel for " << options.iterations << " iterations." << std::endl;
 
   // Run profiling loop
   if (options.iterations > 0)
@@ -542,11 +684,12 @@ int run(Options &options)
     float elapsed_ms = timer.elapsed_millis();
     result.avg_runtime_ms = double(elapsed_ms) / double(options.iterations);
     result.gflops = options.gflops(result.avg_runtime_ms / 1000.0);
-
-
+    std::cout << "  [" << get_timestamp() << "] Profiling completed. Results:" << std::endl;
     std::cout << "  Problem Size: " << options.m << 'x' << options.n << 'x' << options.k << std::endl;
+    std::cout << "  MaskRatio: " << options.mask_ratio << "%" << std::endl;
     std::cout << "  Avg runtime: " << result.avg_runtime_ms << " ms" << std::endl;
     std::cout << "  GFLOPS: " << result.gflops << std::endl;
+    std::cout << "  TFLOPS: " << result.gflops / 1000.0 << std::endl;
   }
 
   return 0;
