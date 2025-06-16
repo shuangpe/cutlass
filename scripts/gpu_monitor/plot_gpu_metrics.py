@@ -148,8 +148,10 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
 
     # Plot utilization chart (now in the first position)
     axes[0].set_title('GPU Utilization (%)')
-    axes[0].plot(df['relative_time'], df['gpu_utilization (%)'], label='GPU Utilization', color='blue')
-    axes[0].plot(df['relative_time'], df['memory_utilization (%)'], label='Memory Utilization', color='magenta')  # Change to more visible magenta
+    # Change color from blue to red for GPU Utilization
+    axes[0].plot(df['relative_time'], df['gpu_utilization (%)'], label='GPU Utilization', color='red')
+    # Change color from magenta to blue for Memory Utilization
+    axes[0].plot(df['relative_time'], df['memory_utilization (%)'], label='Memory Utilization', color='blue')
 
     # Add median lines
     gpu_util_filtered = df[df['gpu_utilization (%)'] > 0]['gpu_utilization (%)']
@@ -157,18 +159,20 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
 
     if not gpu_util_filtered.empty:
         gpu_median = gpu_util_filtered.median()
-        line = axes[0].axhline(y=gpu_median, linestyle='--', color='lightblue', alpha=0.8)
+        # Use green for all median lines
+        line = axes[0].axhline(y=gpu_median, linestyle='--', color='green', alpha=0.8)
         # Increase font size for median labels from 9 to 11
         axes[0].text(0.01, gpu_median, f"{gpu_median:.1f}%",
-                    verticalalignment='center', color='blue', fontsize=11,
+                    verticalalignment='center', color='red', fontsize=11,
                     bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
 
     if not mem_util_filtered.empty:
         mem_median = mem_util_filtered.median()
-        line = axes[0].axhline(y=mem_median, linestyle='--', color='lightpink', alpha=0.8)
-        # Increase font size for median labels from 9 to 11
+        # Use green for Memory median line
+        line = axes[0].axhline(y=mem_median, linestyle='--', color='green', alpha=0.8)
+        # Update text color to match line color
         axes[0].text(0.01, mem_median, f"{mem_median:.1f}%",
-                    verticalalignment='center', color='magenta', fontsize=11,
+                    verticalalignment='center', color='blue', fontsize=11,
                     bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
 
     axes[0].set_ylabel('Utilization (%)')
@@ -197,7 +201,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
         hbm_power_filtered = df[df['gpu_utilization (%)'] > 0]['hbm_power (W)']
         if not hbm_power_filtered.empty:
             hbm_power_median = hbm_power_filtered.median()
-            line = axes[1].axhline(y=hbm_power_median, linestyle='--', color='lightblue', alpha=0.8)
+            line = axes[1].axhline(y=hbm_power_median, linestyle='--', color='green', alpha=0.8)
             # Add median label on the left
             axes[1].text(0.01, hbm_power_median, f"{hbm_power_median:.1f}W",
                         verticalalignment='center', color='blue', fontsize=11,
@@ -207,7 +211,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     power_filtered = df[df['gpu_utilization (%)'] > 0]['power_draw (W)']
     if not power_filtered.empty:
         power_median = power_filtered.median()
-        line = axes[1].axhline(y=power_median, linestyle='--', color='lightgreen', alpha=0.8)
+        line = axes[1].axhline(y=power_median, linestyle='--', color='green', alpha=0.8)
         # Add median label on the left
         axes[1].text(0.01, power_median, f"{power_median:.1f}W",
                     verticalalignment='center', color='green', fontsize=11,
@@ -245,7 +249,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
 
     if not sm_freq_filtered.empty:
         sm_median = sm_freq_filtered.median()
-        line = axes[2].axhline(y=sm_median, linestyle='--', color='lightcoral', alpha=0.8)
+        line = axes[2].axhline(y=sm_median, linestyle='--', color='green', alpha=0.8)
         # Add median label on the left
         axes[2].text(0.01, sm_median, f"{sm_median:.1f}MHz",
                     verticalalignment='center', color='red', fontsize=11,
@@ -253,7 +257,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
 
     if not graphics_freq_filtered.empty:
         gfx_median = graphics_freq_filtered.median()
-        line = axes[2].axhline(y=gfx_median, linestyle='--', color='lightgreen', alpha=0.8)
+        line = axes[2].axhline(y=gfx_median, linestyle='--', color='green', alpha=0.8)
         # Add median label on the left
         axes[2].text(0.01, gfx_median, f"{gfx_median:.1f}MHz",
                     verticalalignment='center', color='green', fontsize=11,
@@ -280,7 +284,7 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
     temp_filtered = df[df['gpu_utilization (%)'] > 0]['temperature (°C)']
     if not temp_filtered.empty:
         temp_median = temp_filtered.median()
-        line = axes[3].axhline(y=temp_median, linestyle='--', color='lightcoral', alpha=0.8)
+        line = axes[3].axhline(y=temp_median, linestyle='--', color='green', alpha=0.8)
         # Add median label on the left
         axes[3].text(0.01, temp_median, f"{temp_median:.1f}°C",
                     verticalalignment='center', color='red', fontsize=11,
@@ -297,36 +301,30 @@ def plot_gpu_metrics(df, output_file=None, show=False, title_prefix="", comments
                 fontsize=11, verticalalignment='bottom', horizontalalignment='center',
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
 
-    # Beautify X axis - modify this part
-    from matplotlib.ticker import FuncFormatter, MultipleLocator
+    # Beautify X axis - 修改这部分
+    from matplotlib.ticker import MultipleLocator
 
-    # Custom formatter function to convert seconds to "seconds.milliseconds" format
-    def format_time(x, pos):
-        total_seconds = int(x)  # Integer part is total seconds
-        milliseconds = int((x % 1) * 1000)  # Decimal part converted to milliseconds
-        # Display in 10ms units
-        return f"{total_seconds}.{milliseconds//10:02d}"
-
-    # Set appropriate major and minor ticks
+    # 设置适当的主要和次要刻度，但不显示标签
     for ax in axes:
-        ax.xaxis.set_major_formatter(FuncFormatter(format_time))
-        # Set appropriate major and minor ticks
+        # 设置适当的主要刻度位置，但不显示标签
         time_range = df['relative_time'].max() - df['relative_time'].min()
+        
         if time_range < 1:  # Less than 1 second
-            ax.xaxis.set_major_locator(MultipleLocator(0.1))  # One major tick every 0.1 seconds
+            ax.xaxis.set_major_locator(MultipleLocator(0.1))
         elif time_range < 10:  # 1-10 seconds
-            ax.xaxis.set_major_locator(MultipleLocator(0.5))  # One major tick every 0.5 seconds
+            ax.xaxis.set_major_locator(MultipleLocator(0.5))
         elif time_range < 60:  # Less than 1 minute
-            ax.xaxis.set_major_locator(MultipleLocator(0.5))  # One major tick every 0.5 seconds
+            ax.xaxis.set_major_locator(MultipleLocator(0.5))
         else:  # More than 1 minute
-            ax.xaxis.set_major_locator(MultipleLocator(2))  # One major tick every 2 seconds for larger ranges
+            ax.xaxis.set_major_locator(MultipleLocator(2))
 
-        # Rotate x-axis labels 45 degrees
-        for label in ax.get_xticklabels():
-            label.set_rotation(45)
-            label.set_ha('right')  # Horizontal alignment is right-aligned
+        # 隐藏所有子图的x轴刻度标签
+        ax.set_xticklabels([])
 
         ax.set_xlim(df['relative_time'].min(), df['relative_time'].max())
+
+    # 在底部子图保留"Time"标签，但不显示具体值
+    axes[3].set_xlabel('Time')
 
     plt.tight_layout()
     plt.subplots_adjust(top=0.95)
@@ -428,10 +426,16 @@ def process_csv_file(csv_path, output=None, show=False, title='', crop=True, mar
             print(f"Data cropped from {original_length} to {len(df)} points, removed zero utilization periods")
 
     # Output some statistics
-    print(f"Read {len(df)} records")
+    print(f"Read {len(df)} records from {os.path.basename(csv_path)}")
     print("Statistics:")
+    
+    # Format and print column headers
+    print("  {:<25} {:>10} {:>10} {:>10} {:>10}".format(
+        "Metric", "Mean", "Median", "Min", "Max"))
+    print("  {:<25} {:>10} {:>10} {:>10} {:>10}".format(
+        "-" * 25, "-" * 10, "-" * 10, "-" * 10, "-" * 10))
 
-    # 收集统计信息
+    # Collect statistics
     stats_dict = collect_statistics(df, csv_path)
 
     # Suppress warnings for mean calculation on empty slices
@@ -439,7 +443,7 @@ def process_csv_file(csv_path, output=None, show=False, title='', crop=True, mar
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
 
-        # Calculate and print useful statistics (including median) - one line per metric
+        # Calculate and print useful statistics with consistent formatting
         for col in df.columns:
             if col != 'timestamp' and col != 'relative_time':
                 try:
@@ -448,10 +452,11 @@ def process_csv_file(csv_path, output=None, show=False, title='', crop=True, mar
                     max_val = df[col].max()
                     min_val = df[col].min()
 
-                    # All statistics in one line
-                    print(f"  {col}: Mean={mean_val:.2f}, Median={median_val:.2f}, Max={max_val:.2f}, Min={min_val:.2f}")
+                    # Print formatted statistics
+                    print("  {:<25} {:>10.2f} {:>10.2f} {:>10.2f} {:>10.2f}".format(
+                        col, mean_val, median_val, min_val, max_val))
                 except Exception as e:
-                    print(f"  {col}: Processing error - {e}")
+                    print(f"  {col:<25} Error: {e}")
 
     # Plot chart
     plot_gpu_metrics(df, output, show, title, comments)
