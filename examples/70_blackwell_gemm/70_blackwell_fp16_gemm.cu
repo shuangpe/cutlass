@@ -203,6 +203,7 @@ struct Options {
   int mask_ratio;
   double scope_min;
   double scope_max;
+  bool skip_verify;
 
   Options():
     help(false),
@@ -212,7 +213,8 @@ struct Options {
     swizzle(0),
     mask_ratio(0),
     scope_min(-5),
-    scope_max(5)
+    scope_max(5),
+    skip_verify(false)
   { }
 
   // Parses the command line
@@ -234,6 +236,7 @@ struct Options {
     cmd.get_cmd_line_argument("mask_ratio", mask_ratio, 0);
     cmd.get_cmd_line_argument("scope_min", scope_min, -5.0);
     cmd.get_cmd_line_argument("scope_max", scope_max, 5.0);
+    cmd.get_cmd_line_argument("skip_verify", skip_verify, false);
   }
 
   /// Prints the usage statement.
@@ -252,11 +255,12 @@ struct Options {
       << "  --mask_ratio=<int>           Percentage of elements to mask (set to zero) in A and B, default 0 (no mask)\n\n"
       << "  --scope_min=<float>         Minimum value for random initialization (default: -5)\n"
       << "  --scope_max=<float>         Maximum value for random initialization (default: 5)\n\n"
-      << "  --iterations=<int>          Number of profiling iterations to perform.\n\n";
+      << "  --iterations=<int>          Number of profiling iterations to perform.\n\n"
+      << "  --skip_verify=<bool>        If specified, skips verification step\n";
 
     out
       << "\n\nExamples:\n\n"
-      << "$ " << "70_blackwell_fp16_gemm" << " --m=1024 --n=512 --k=1024 --alpha=2 --beta=0.707 --scope_min=-2 --scope_max=2 \n\n";
+      << "$ " << "70_blackwell_fp16_gemm" << " --m=1024 --n=512 --k=1024 --alpha=2 --beta=0.707 --scope_min=-2 --scope_max=2 --skip_verify=true \n\n";
 
     return out;
   }
@@ -538,13 +542,17 @@ int run(Options &options)
 
   // Check if output from CUTLASS kernel and reference kernel are equal or not
   Result result;
-  result.passed = verify(options);
+  if (!options.skip_verify) {
+    result.passed = verify(options);
 
-  std::cout << "  [" << get_timestamp() << "]";
-  std::cout << "  Disposition: " << (result.passed ? "Passed" : "Failed") << std::endl;
+    std::cout << "  [" << get_timestamp() << "]";
+    std::cout << "  Disposition: " << (result.passed ? "Passed" : "Failed") << std::endl;
 
-  if (!result.passed) {
-    exit(-1);
+    if (!result.passed) {
+      exit(-1);
+    }
+  } else {
+    std::cout << "  [" << get_timestamp() << "]  Disposition: Skipped" << std::endl;
   }
 
   // Run profiling loop
