@@ -7209,14 +7209,14 @@ def GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
 
   # layouts for ABC and their alignments.
   layouts = [
-    [[LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 0]], 
-    [[LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.RowMajor,    16], [LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    0]],
-    [[LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    16], [LayoutType.RowMajor,    0]],
+    # [[LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 0]], 
+    # [[LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.RowMajor,    16], [LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    0]],
+    # [[LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    16], [LayoutType.RowMajor,    0]],
     [[LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    0]],
-    [[LayoutType.RowMajor,    16], [LayoutType.RowMajor,    16], [LayoutType.RowMajor,    0]],
+    # [[LayoutType.RowMajor,    16], [LayoutType.RowMajor,    16], [LayoutType.RowMajor,    0]],
   ]
 
   thor_sm = 101
@@ -7414,9 +7414,9 @@ def GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
       layout[2][1] = 128 // DataTypeSize[data_types[0]["d_type"]]
 
     for data_type in data_types:
-      if ( data_type["a_type"] == DataType.e4m3 ) and ( data_type["b_type"] == DataType.e4m3 ) and\
-         ( data_type["d_type"] == DataType.e5m2 ):
-        continue
+      # if ( data_type["a_type"] == DataType.e4m3 ) and ( data_type["b_type"] == DataType.e4m3 ) and\
+      #    ( data_type["d_type"] == DataType.e5m2 ):
+      #   continue
       kernel_schedule = to_grouped_schedule(KernelScheduleType.TmaWarpSpecialized1SmSm100, grouped)
       epi_schedule = to_grouped_schedule(EpilogueScheduleType.TmaWarpSpecialized1Sm, grouped)
       CreateGemmUniversal3xOperator(manifest, layouts, tile_descriptions, data_type,
@@ -7506,8 +7506,12 @@ def GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
                          ]                   
 
   for math_inst in math_instructions_2sm:
+    if math_inst.instruction_shape[0] != 256 or math_inst.instruction_shape[1] != 256:
+      continue
     tile_descriptions = []
     for cluster_shape in cluster_shapes_2sm:
+      if cluster_shape in [[2,2,1], [2,4,1], [4,2,1]]:
+        continue
       multiplier_2sm = (1, 1, 1) if cluster_shape == DynamicClusterShape else (cluster_shape[0] // 2, cluster_shape[1], cluster_shape[2])
       tile_descriptions.append(
         TileDescription([
@@ -7620,8 +7624,11 @@ def GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
       layout[2][1] = 128 // DataTypeSize[data_types[0]["d_type"]]
 
     for data_type in data_types:
-      if ( data_type["a_type"] == DataType.e4m3 ) and ( data_type["b_type"] == DataType.e4m3 ) and\
-         ( data_type["d_type"] == DataType.e5m2 ):
+      if (data_type["a_type"] != data_type["b_type"]):
+        continue
+      if (data_type["c_type"] != DataType.void):
+        continue
+      if (data_type["d_type"] != DataType.e4m3):
         continue
 
       if grouped:
@@ -8290,8 +8297,8 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
       continue
     tile_descriptions = []
     for cluster_shape in cluster_shapes_2sm:
-      if cluster_shape not in [[2,1,1]]:
-        continue
+      # if cluster_shape not in [[2,1,1]]:
+      #   continue
       multiplier_2sm = (1, 1, 1) if cluster_shape == DynamicClusterShape else (cluster_shape[0] // 2, cluster_shape[1], cluster_shape[2])
       tile_descriptions.append(
         TileDescription([
@@ -8345,9 +8352,11 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
 
     # Set alignment d based on Destination format.
     for data_type in data_types:
-      if ( data_type["a_type"] != DataType.e4m3 or data_type["b_type"] != DataType.e4m3):
+      if (data_type["c_type"] != DataType.void):
         continue
-      if ( data_type["c_type"] != DataType.void or data_type["d_type"] != DataType.e4m3):
+      if (data_type["d_type"] != DataType.e4m3):
+        continue
+      if ( data_type["a_type"] != DataType.e4m3 or data_type["b_type"] != DataType.e4m3):
         continue
       for layout in layouts:
         # alignment for a
@@ -9966,11 +9975,11 @@ def GenerateSM100_TensorOp_fp8_UMMA_gemm_stream_k(manifest, cuda_version):
 
   # layouts for ABC and their alignments.
   layouts = [
-    [[LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 0]],
     [[LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.RowMajor,    16], [LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 0]],
-    [[LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    0]],
+    # [[LayoutType.RowMajor,    16], [LayoutType.RowMajor,    16], [LayoutType.ColumnMajor, 0]],
+    # [[LayoutType.ColumnMajor, 16], [LayoutType.ColumnMajor, 16], [LayoutType.RowMajor,    0]],
   ]
 
   thor_sm = 101
@@ -10080,9 +10089,9 @@ def GenerateSM100_TensorOp_fp8_UMMA_gemm_stream_k(manifest, cuda_version):
       layout[2][1] = 128 // DataTypeSize[data_types[0]["d_type"]]
 
     for data_type in data_types:
-      if ( data_type["a_type"] == DataType.e4m3 ) and ( data_type["b_type"] == DataType.e4m3 ) and\
-         ( data_type["d_type"] == DataType.e5m2 ):
-        continue
+      # if ( data_type["a_type"] == DataType.e4m3 ) and ( data_type["b_type"] == DataType.e4m3 ) and\
+      #    ( data_type["d_type"] == DataType.e5m2 ):
+      #   continue
 
       if math_inst.instruction_shape[0] == 128:
         epi_schedule = EpilogueScheduleType.TmaWarpSpecialized2Sm
@@ -10977,7 +10986,7 @@ def GenerateSM100(manifest, cuda_version):
   # if not bool(set(manifest.compute_capabilities_feature_set).intersection(arch_family_cc)):
   #   GenerateSM100_TensorOp_int8_UMMA_gemm(manifest, cuda_version)
 
-  # GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version)
+  GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version)
   # # grouped GEMM
   # GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
   # GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
