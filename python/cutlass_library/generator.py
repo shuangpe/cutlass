@@ -10967,7 +10967,7 @@ def GenerateSM100(manifest, cuda_version):
   #
   # Dense Gemm
   #
-  GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version)
+  # GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version)
 
   # GenerateSM100_TensorOp_32b_UMMA_gemm(manifest, cuda_version)
   # GenerateSM100_TensorOp_32b_UMMA_gemm_stream_k(manifest, cuda_version) 
@@ -11005,7 +11005,7 @@ def GenerateSM100(manifest, cuda_version):
   # Block Scaled Gemm
   #
   GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cuda_version)
-  GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version)
+  # GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version)
   # GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_version,  gemm_kind=GemmKind.GroupedBlockScaledUniversal3x)
   #
   # Conv
