@@ -104,9 +104,11 @@ using         LayoutB     = cutlass::layout::ColumnMajor;                   // L
 constexpr int AlignmentB  = 128 / cutlass::sizeof_bits<ElementB>::value;    // Memory access granularity/alignment of B matrix in units of elements (up to 16 bytes)
 
 // C/D matrix configuration
-using         ElementC    = half_t;                                          // Element type for C and D matrix operands
+using         ElementD    = half_t;                                          // Element type for C and D matrix operands
+using         ElementC    = void;                                          // Element type for C and D matrix operands
+using         ElementCSafe = cute::conditional_t<cute::is_void_v<ElementC>,ElementD,ElementC>; // prevents void ref breakages
 using         LayoutC     = cutlass::layout::RowMajor;                   // Layout type for C and D matrix operands
-constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<ElementC>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
+constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<ElementD>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
 
 // Kernel functional config
 using ElementAccumulator  = float;                                          // Element type for internal accumulation
@@ -126,7 +128,7 @@ using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBui
     cutlass::epilogue::collective::EpilogueTileAuto,
     ElementAccumulator, ElementAccumulator,
     ElementC, LayoutC, AlignmentC,
-    ElementC, LayoutC, AlignmentC,
+    ElementD, LayoutC, AlignmentC,
     cutlass::epilogue::collective::EpilogueScheduleAuto
   >::CollectiveOp;
 
@@ -156,7 +158,7 @@ using DeviceGemmReference = cutlass::reference::device::Gemm<
   LayoutA,
   ElementB,
   LayoutB,
-  ElementC,
+  ElementD,
   LayoutC,
   ElementAccumulator,
   ElementAccumulator>;
@@ -179,7 +181,7 @@ uint64_t seed;
 
 cutlass::DeviceAllocation<typename Gemm::ElementA> block_A;
 cutlass::DeviceAllocation<typename Gemm::ElementB> block_B;
-cutlass::DeviceAllocation<typename Gemm::ElementC> block_C;
+cutlass::DeviceAllocation<ElementCSafe> block_C;
 cutlass::DeviceAllocation<typename Gemm::EpilogueOutputOp::ElementOutput> block_D;
 cutlass::DeviceAllocation<typename Gemm::EpilogueOutputOp::ElementOutput> block_ref_D;
 
@@ -320,13 +322,16 @@ void initialize(const Options &options) {
 
   block_A.reset(options.m * options.k);
   block_B.reset(options.k * options.n);
-  block_C.reset(options.m * options.n);
   block_D.reset(options.m * options.n);
   block_ref_D.reset(options.m * options.n);
 
   initialize_block(block_A, seed + 2023, options.scope_min, options.scope_max);
   initialize_block(block_B, seed + 2022, options.scope_min, options.scope_max);
-  initialize_block(block_C, seed + 2021, options.scope_min, options.scope_max);
+
+  if constexpr (not is_same_v<ElementC, void>) {
+    block_C.reset(options.m * options.n);
+    initialize_block(block_C, seed + 2021, options.scope_min, options.scope_max);
+  }
 
   std::vector<typename Gemm::ElementA> host_A(options.m * options.k);
   std::vector<typename Gemm::ElementB> host_B(options.k * options.n);
