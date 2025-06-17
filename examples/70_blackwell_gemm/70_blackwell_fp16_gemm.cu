@@ -199,6 +199,8 @@ struct Options {
   int m, n, k;
   int swizzle;
   int mask_ratio;
+  double scope_min;
+  double scope_max;
 
   Options():
     help(false),
@@ -206,7 +208,9 @@ struct Options {
     alpha(1.f), beta(0.f),
     iterations(2000),
     swizzle(0),
-    mask_ratio(0)
+    mask_ratio(0),
+    scope_min(-5),
+    scope_max(5)
   { }
 
   // Parses the command line
@@ -226,6 +230,8 @@ struct Options {
     cmd.get_cmd_line_argument("iterations", iterations);
     cmd.get_cmd_line_argument("swizzle", swizzle);
     cmd.get_cmd_line_argument("mask_ratio", mask_ratio, 0);
+    cmd.get_cmd_line_argument("scope_min", scope_min, -5.0);
+    cmd.get_cmd_line_argument("scope_max", scope_max, 5.0);
   }
 
   /// Prints the usage statement.
@@ -241,12 +247,14 @@ struct Options {
       << "  --alpha=<f32>               Epilogue scalar alpha\n"
       << "  --beta=<f32>                Epilogue scalar beta\n\n"
       << "  --swizzle=<int>             Cluster rasterization swizzle\n\n"
-        << "  --mask_ratio=<int>           Percentage of elements to mask (set to zero) in A and B, default 0 (no mask)\n\n"
-        << "  --iterations=<int>          Number of profiling iterations to perform.\n\n";
+      << "  --mask_ratio=<int>           Percentage of elements to mask (set to zero) in A and B, default 0 (no mask)\n\n"
+      << "  --scope_min=<float>         Minimum value for random initialization (default: -5)\n"
+      << "  --scope_max=<float>         Maximum value for random initialization (default: 5)\n\n"
+      << "  --iterations=<int>          Number of profiling iterations to perform.\n\n";
 
     out
       << "\n\nExamples:\n\n"
-      << "$ " << "70_blackwell_fp16_gemm" << " --m=1024 --n=512 --k=1024 --alpha=2 --beta=0.707 \n\n";
+      << "$ " << "70_blackwell_fp16_gemm" << " --m=1024 --n=512 --k=1024 --alpha=2 --beta=0.707 --scope_min=-2 --scope_max=2 \n\n";
 
     return out;
   }
@@ -291,27 +299,13 @@ struct Result
 template <class Element>
 bool initialize_block(
   cutlass::DeviceAllocation<Element>& block,
-  uint64_t seed=2023) {
-
-  Element scope_max, scope_min;
-  int bits_input = cutlass::sizeof_bits<Element>::value;
-
-  if (bits_input == 1) {
-    scope_max = Element(2);
-    scope_min = Element(0);
-  } else if (bits_input <= 8) {
-    scope_max = Element(2);
-    scope_min = Element(-2);
-  } else {
-    scope_max = Element(8);
-    scope_min = Element(-8);
-  }
-
-  scope_max = Element(5);
-  scope_min = Element(-5);
+  uint64_t seed = 2023,
+  double scope_min = -5,
+  double scope_max = 5
+) {
 
   cutlass::reference::device::BlockFillRandomUniform(
-    block.get(), block.size(), seed, scope_max, scope_min, 0);
+    block.get(), block.size(), seed, Element(scope_max), Element(scope_min), 0);
 
   return true;
 }
@@ -330,9 +324,9 @@ void initialize(const Options &options) {
   block_D.reset(options.m * options.n);
   block_ref_D.reset(options.m * options.n);
 
-  initialize_block(block_A, seed + 2023);
-  initialize_block(block_B, seed + 2022);
-  initialize_block(block_C, seed + 2021);
+  initialize_block(block_A, seed + 2023, options.scope_min, options.scope_max);
+  initialize_block(block_B, seed + 2022, options.scope_min, options.scope_max);
+  initialize_block(block_C, seed + 2021, options.scope_min, options.scope_max);
 
   std::vector<typename Gemm::ElementA> host_A(options.m * options.k);
   std::vector<typename Gemm::ElementB> host_B(options.k * options.n);
@@ -569,6 +563,7 @@ int run(Options &options)
     std::cout << "  [" << get_timestamp() << "] "
               << "Profiling completed. Results:" << std::endl;
     std::cout << "  Problem Size: " << options.m << 'x' << options.n << 'x' << options.k << std::endl;
+    std::cout << "  ScopeRange: [" << options.scope_min << ", " << options.scope_max << "]" << std::endl;
     std::cout << "  MaskRatio: " << options.mask_ratio << "%" << std::endl;
     std::cout << "  Avg runtime: " << result.avg_runtime_ms << " ms" << std::endl;
     std::cout << "  GFLOPS: " << result.gflops << std::endl;

@@ -218,7 +218,9 @@ struct Options {
   int m, n, k;
   int swizzle = 0;
   int mask_ratio = 0;
-  bool skip_verify;  // 添加skip_verify选项
+  bool skip_verify;
+  double scope_min;
+  double scope_max;
 
   Options():
     help(false),
@@ -227,7 +229,9 @@ struct Options {
     iterations(10),
     swizzle(0),
     mask_ratio(0),
-    skip_verify(false)  // 默认值为false
+    skip_verify(false),
+    scope_min(-5),
+    scope_max(5)
   { }
 
   // Parses the command line
@@ -246,8 +250,10 @@ struct Options {
     cmd.get_cmd_line_argument("beta", beta, 0.f);
     cmd.get_cmd_line_argument("iterations", iterations);
     cmd.get_cmd_line_argument("swizzle", swizzle);
-    cmd.get_cmd_line_argument("mask-ratio", mask_ratio, 0);
-    cmd.get_cmd_line_argument("skip_verify", skip_verify, false);  // 解析skip_verify参数
+    cmd.get_cmd_line_argument("mask_ratio", mask_ratio, 0);
+    cmd.get_cmd_line_argument("skip_verify", skip_verify, false);
+    cmd.get_cmd_line_argument("scope_min", scope_min, -5.0);
+    cmd.get_cmd_line_argument("scope_max", scope_max, 5.0);
   }
 
   /// Prints the usage statement.
@@ -263,7 +269,10 @@ struct Options {
       << "  --alpha=<f32>               Epilogue scalar alpha\n"
       << "  --beta=<f32>                Epilogue scalar beta\n"
       << "  --swizzle=<int>             Cluster rasterization swizzle\n"
-      << "  --iterations=<int>          Number of profiling iterations to perform.\n"
+      << "  --mask_ratio=<int>           Percentage of elements to mask (set to zero) in A and B, default 0 (no mask)\n\n"
+      << "  --scope_min=<float>         Minimum value for random initialization (default: -5)\n"
+      << "  --scope_max=<float>         Maximum value for random initialization (default: 5)\n\n"
+      << "  --iterations=<int>          Number of profiling iterations to perform.\n\n"
       << "  --skip_verify=<bool>        If specified, skips verification step\n";
 
     out << "\n\nExamples:\n\n"
@@ -312,36 +321,13 @@ struct Result
 template <typename Element, typename Layout>
 bool initialize_block(
   cutlass::TensorView<Element, Layout> view,
-  uint64_t seed) {
+  uint64_t seed,
+  double scope_min,
+  double scope_max
+) {
 
-  double scope_max, scope_min;
   constexpr int bits_input = cutlass::sizeof_bits<Element>::value;
 
-  if constexpr (bits_input == 1) {
-    scope_max = 2;
-    scope_min = 0;
-  }
-  else if constexpr (bits_input <= 6) {
-    scope_max = 2;
-    scope_min = -2;
-  }
-  else if constexpr (bits_input <= 8) {
-    if constexpr (cute::is_same_v<Element, cutlass::float_ue8m0_t>) {
-      scope_max = 4;
-      scope_min = 1;
-    }
-    else {
-      scope_max = 1;
-      scope_min = -1;
-    }
-  }
-  else{
-    scope_max = 4;
-    scope_min = -4;
-  }
-
-  scope_max = 5;
-  scope_min = -5;
 
   cutlass::reference::host::TensorFillRandomUniform(
     view, seed, scope_max, scope_min, 0);
@@ -374,14 +360,14 @@ void initialize(const Options &options) {
   block_SFA.reset(cutlass::make_Coord(size(filter_zeros(layout_SFA))));
   block_SFB.reset(cutlass::make_Coord(size(filter_zeros(layout_SFB))));
 
-  initialize_block(block_A.host_view(), seed + 2021);
-  initialize_block(block_B.host_view(), seed + 2022);
-  initialize_block(block_SFA.host_view(), seed + 2024);
-  initialize_block(block_SFB.host_view(), seed + 2025);
+  initialize_block(block_A.host_view(), seed + 2021, options.scope_min, options.scope_max);
+  initialize_block(block_B.host_view(), seed + 2022, options.scope_min, options.scope_max);
+  initialize_block(block_SFA.host_view(), seed + 2024, options.scope_min, options.scope_max);
+  initialize_block(block_SFB.host_view(), seed + 2025, options.scope_min, options.scope_max);
 
   if constexpr (not is_same_v<ElementC, void>) {
     block_C.reset(cutlass::make_Coord(size(layout_C)));
-    initialize_block(block_C.host_view(), seed + 2023);
+    initialize_block(block_C.host_view(), seed + 2023, options.scope_min, options.scope_max);
   }
 
   using DispatchPolicy = typename CollectiveMainloop::DispatchPolicy;
@@ -652,6 +638,7 @@ int run(Options &options)
     std::cout << "  [" << get_timestamp() << "] " << "Profiling completed. Results:" << std::endl;
     std::cout << "  Problem Size: " << options.m << 'x' << options.n << 'x' << options.k << std::endl;
     std::cout << "  MaskRatio: " << options.mask_ratio << "%" << std::endl;
+    std::cout << "  ScopeRange: [" << options.scope_min << ", " << options.scope_max << "]" << std::endl;
     std::cout << "  Avg runtime: " << result.avg_runtime_ms << " ms" << std::endl;
     std::cout << "  GFLOPS: " << result.gflops << std::endl;
     std::cout << "  TFLOPS: " << result.gflops / 1000.0 << std::endl;
