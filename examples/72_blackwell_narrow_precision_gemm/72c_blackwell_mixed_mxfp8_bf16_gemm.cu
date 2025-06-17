@@ -108,11 +108,12 @@ constexpr int AlignmentB  = 128;                                            // M
 
 // C/D matrix configuration
 using         ElementD    = cutlass::float_e4m3_t;                            // Element type for D matrix operand
-using         ElementC    = cutlass::half_t;                            // Element type for C matrix operand
+using         ElementC    = void;                            // Element type for C matrix operand
+using         ElementCSafe = cute::conditional_t<cute::is_void_v<ElementC>,half_t,ElementC>; // prevents void ref breakages
 using         LayoutCTag  = cutlass::layout::RowMajor;                      // Layout type for C matrix operand
 using         LayoutDTag  = cutlass::layout::RowMajor;                      // Layout type for D matrix operand
 constexpr int AlignmentD  = 128 / cutlass::sizeof_bits<ElementD>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
-constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<ElementC>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
+constexpr int AlignmentC  = 128 / cutlass::sizeof_bits<ElementCSafe>::value;    // Memory access granularity/alignment of C matrix in units of elements (up to 16 bytes)
 // Kernel functional config
 using ElementAccumulator  = float;                                          // Element type for internal accumulation
 using ArchTag             = cutlass::arch::Sm100;                           // Tag indicating the minimum SM that supports the intended feature
@@ -185,7 +186,7 @@ cutlass::HostTensor<ElementA::DataType, cutlass::layout::PackedVectorLayout> blo
 cutlass::HostTensor<ElementA::ScaleFactorType, cutlass::layout::PackedVectorLayout> block_SFA;
 cutlass::HostTensor<ElementB::DataType, cutlass::layout::PackedVectorLayout> block_B;
 cutlass::HostTensor<ElementB::ScaleFactorType, cutlass::layout::PackedVectorLayout> block_SFB;
-cutlass::HostTensor<ElementC, cutlass::layout::PackedVectorLayout> block_C;
+cutlass::HostTensor<ElementCSafe, cutlass::layout::PackedVectorLayout> block_C;
 // Output Tensor
 cutlass::HostTensor<ElementD, cutlass::layout::PackedVectorLayout> block_D;
 // Reference Output Tensor
@@ -368,7 +369,6 @@ void initialize(const Options &options) {
 
   block_A.reset(cutlass::make_Coord(size(layout_A)));
   block_B.reset(cutlass::make_Coord(size(layout_B)));
-  block_C.reset(cutlass::make_Coord(size(layout_C)));
   block_D.reset(cutlass::make_Coord(size(layout_D)));
   block_reference_D.reset(cutlass::make_Coord(size(layout_D)));
   block_SFA.reset(cutlass::make_Coord(size(filter_zeros(layout_SFA))));
@@ -376,9 +376,13 @@ void initialize(const Options &options) {
 
   initialize_block(block_A.host_view(), seed + 2021);
   initialize_block(block_B.host_view(), seed + 2022);
-  initialize_block(block_C.host_view(), seed + 2023);
   initialize_block(block_SFA.host_view(), seed + 2024);
   initialize_block(block_SFB.host_view(), seed + 2025);
+
+  if constexpr (not is_same_v<ElementC, void>) {
+    block_C.reset(cutlass::make_Coord(size(layout_C)));
+    initialize_block(block_C.host_view(), seed + 2023);
+  }
 
   using DispatchPolicy = typename CollectiveMainloop::DispatchPolicy;
   using CtaShape_MNK = typename CollectiveMainloop::CtaShape_MNK;
@@ -461,14 +465,26 @@ void initialize(const Options &options) {
 
   block_A.sync_device();
   block_B.sync_device();
-  block_C.sync_device();
   block_SFA.sync_device();
   block_SFB.sync_device();
+
+  if constexpr (not is_same_v<ElementC, void>) {
+    block_C.sync_device();
+  }
 }
 
 // Populates a Gemm::Arguments structure from the given commandline options
 typename Gemm::Arguments args_from_options(const Options &options)
 {
+  auto ptr_C = [&]() {
+    if constexpr (not is_same_v<ElementC, void>) {
+      return block_C.device_data();
+    }
+    else {
+      return static_cast<ElementD const*>(nullptr); // C is not used in this case
+    }
+  }();
+
   typename Gemm::Arguments arguments {
     cutlass::gemm::GemmUniversalMode::kGemm,
     {options.m, options.n, options.k, 1},
@@ -480,7 +496,7 @@ typename Gemm::Arguments args_from_options(const Options &options)
     },
     { // Epilogue arguments
       {options.alpha, options.beta},
-      block_C.device_data(), stride_C,
+      ptr_C, stride_C,
       block_D.device_data(), stride_D
     }
   };
@@ -505,7 +521,15 @@ bool verify(const Options &options) {
       decltype(tensor_SFB)                // TensorSfB
     > mainloop_params{tensor_A, tensor_SFA, tensor_B, tensor_SFB};
 
-  auto tensor_C = cute::make_tensor(make_iterator(block_C.host_data()), layout_C);
+  auto tensor_C = [&]() {
+    if constexpr (not is_same_v<ElementC, void>) {
+      return cute::make_tensor(make_iterator(block_C.host_data()), layout_C);
+    }
+    else {
+      return cute::make_tensor(make_iterator(static_cast<ElementD const*>(nullptr)), layout_C);
+    }
+  }();
+
   auto tensor_D = cute::make_tensor(make_iterator(block_reference_D.host_data()), layout_D);
  
   cutlass::reference::host::GettBlockScalingEpilogueParams<
