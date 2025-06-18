@@ -7132,7 +7132,7 @@ def GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
     if math_inst.element_a != DataType.f16 or math_inst.element_b != DataType.f16 or math_inst.element_accumulator != DataType.f32:
       continue
     for cluster_shape in cluster_shapes_2sm:
-      if cluster_shape not in [[2,1,1], [4,2,1], [4,4,1]]:
+      if cluster_shape not in [[4,2,1]]:
         continue
       multiplier_2sm = (1, 1, 1) if cluster_shape == DynamicClusterShape else (cluster_shape[0] // 2, cluster_shape[1], cluster_shape[2])
       tile_descriptions.append(
@@ -8277,10 +8277,10 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
 
   cluster_shapes_2sm = [
     [2,1,1],
-    # [2,2,1],
-    # [2,4,1],
+    [2,2,1],
+    [2,4,1],
     [4,1,1],
-    # [4,2,1],
+    [4,2,1],
     [4,4,1]
     , DynamicClusterShape
   ]
@@ -8297,7 +8297,7 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
       continue
     tile_descriptions = []
     for cluster_shape in cluster_shapes_2sm:
-      if cluster_shape in [[4,1,1]]:
+      if cluster_shape not in [[4,2,1]]:
         continue
       multiplier_2sm = (1, 1, 1) if cluster_shape == DynamicClusterShape else (cluster_shape[0] // 2, cluster_shape[1], cluster_shape[2])
       tile_descriptions.append(
@@ -8640,14 +8640,14 @@ def GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_versio
     ]
 
   for math_inst in math_instructions_2sm:
-    # if math_inst.instruction_shape[0] != 256 or math_inst.instruction_shape[1] != 256:
-    #   continue
+    if math_inst.instruction_shape[0] != 256 or math_inst.instruction_shape[1] != 256:
+      continue
     if math_inst.element_scale_factor != DataType.ue4m3:
       continue
     tile_descriptions = []
     for cluster_shape in cluster_shapes_2sm:
-      # if cluster_shape not in [[2,1,1]]:
-      #   continue
+      if cluster_shape not in [[4,2,1]]:
+        continue
       multiplier_2sm = (1, 1, 1) if cluster_shape == DynamicClusterShape else (cluster_shape[0] // 2, cluster_shape[1], cluster_shape[2])
       tile_descriptions.append(
         TileDescription([
