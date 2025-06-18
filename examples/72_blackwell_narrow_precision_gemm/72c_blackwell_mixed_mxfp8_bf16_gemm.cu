@@ -325,13 +325,8 @@ bool initialize_block(
   double scope_min,
   double scope_max
 ) {
-
-  constexpr int bits_input = cutlass::sizeof_bits<Element>::value;
-
-
   cutlass::reference::host::TensorFillRandomUniform(
     view, seed, scope_max, scope_min, 0);
-  
   return true;
 }
 
@@ -388,6 +383,25 @@ void initialize(const Options &options) {
 
   auto mask_start_0 = std::chrono::high_resolution_clock::now();
 
+  constexpr bool is_row_major_a = std::is_same_v<LayoutA, cutlass::layout::RowMajor>;
+  constexpr bool is_column_major_b = std::is_same_v<LayoutB, cutlass::layout::ColumnMajor>;
+
+  auto get_coord_a = [&](int m, int k) {
+    if constexpr (is_row_major_a) {
+      return cutlass::make_Coord(m * options.k + k);
+    } else {
+      return cutlass::make_Coord(k * options.m + m);
+    }
+  };
+
+  auto get_coord_b = [&](int k, int n) {
+    if constexpr (is_column_major_b) {
+      return cutlass::make_Coord(n * options.k + k);
+    } else {
+      return cutlass::make_Coord(k * options.n + n);
+    }
+  };
+
   // Mask host_A and host_B if mask_ratio > 0
   if (options.mask_ratio > 0) {
     auto mask_start = std::chrono::high_resolution_clock::now();
@@ -414,14 +428,18 @@ void initialize(const Options &options) {
 
     // Mask elements in the first tile of A
     for (size_t i = 0; i < num_mask_A; ++i) {
-      int idx = indices_A[i];
-      block_A.at(cutlass::make_Coord(idx)) = typename Gemm::ElementA(0);
+      int m = indices_A[i] / tile_k;
+      int k = indices_A[i] % tile_k;
+      int idx = m * options.k + k;
+      block_A.at(get_coord_a(m, k)) = typename Gemm::ElementA(0);
     }
 
     // Mask elements in the first tile of B
     for (size_t i = 0; i < num_mask_B; ++i) {
-      int idx = indices_B[i];
-      block_B.at(cutlass::make_Coord(idx)) = typename Gemm::ElementB(0);
+      int k = indices_B[i] / tile_n;
+      int n = indices_B[i] % tile_n;
+      int idx = k * options.n + n;
+      block_B.at(get_coord_b(k, n)) = typename Gemm::ElementB(0);
     }
     std::cout << "Masked elements in A: " << num_mask_A << ", B: " << num_mask_B << std::endl;
 
@@ -434,14 +452,14 @@ void initialize(const Options &options) {
   for (int m = 0; m < options.m; ++m) {
     for (int k = 0; k < options.k; ++k) {
       if (m < tile_m && k < tile_k) continue;
-      block_A.at(cutlass::make_Coord(m * options.k + k)) = block_A.at(cutlass::make_Coord((m % tile_m) * options.k + (k % tile_k)));
+      block_A.at(get_coord_a(m, k)) = block_A.at(get_coord_a((m % tile_m), (k % tile_k)));
     }
   }
 
   for (int k = 0; k < options.k; ++k) {
     for (int n = 0; n < options.n; ++n) {
       if (k < tile_k && n < tile_n) continue;
-      block_B.at(cutlass::make_Coord(k * options.n + n)) = block_B.at(cutlass::make_Coord((k % tile_k) * options.n + (n % tile_n)));
+      block_B.at(get_coord_b(k, n)) = block_B.at(get_coord_b((k % tile_k), (n % tile_n)));
     }
   }
 
