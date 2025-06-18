@@ -5,6 +5,13 @@ import json
 import sys
 import argparse
 
+# Define default keys order used in multiple functions
+DEFAULT_KEYS = [
+    "problem_size", "stages", "tile_shape", "disposition",
+    "iterations", "avg_runtime", "scope_range",
+    "hack_load_g2l", "mask_ratio", "tflops"
+]
+
 def parse_test_output(text):
     """
     Parse CUTLASS test output to extract key metrics.
@@ -15,7 +22,6 @@ def parse_test_output(text):
     Returns:
         dict: Extracted metrics
     """
-    # Initialize result dictionary with empty values
     result = {
         "problem_size": "",
         "stages": "",
@@ -26,10 +32,10 @@ def parse_test_output(text):
         "disposition": "",
         "iterations": "",
         "avg_runtime": "",
-        "mask_ratio": ""
+        "mask_ratio": "",
+        "scope_range": ""
     }
 
-    # Define regex patterns for each field
     patterns = {
         "problem_size": r"Problem Size:\ ([0-9x]+)",
         "stages": r"Stages:\ ([0-9]+)",
@@ -40,16 +46,15 @@ def parse_test_output(text):
         "disposition": r"Disposition:\ ([A-Za-z]+)",
         "iterations": r"Start profiling CUTLASS kernel for ([0-9]+) iterations",
         "avg_runtime": r"Avg runtime: ([0-9.]+) ms",
-        "mask_ratio": r"MaskRatio:\ ([0-9.%]+)"
+        "mask_ratio": r"MaskRatio:\ ([0-9.%]+)",
+        "scope_range": r"ScopeRange:\ (\[[^]]+\])"  # Capture the entire range including brackets
     }
 
-    # Extract values using regex
     for key, pattern in patterns.items():
         match = re.search(pattern, text)
         if match:
             result[key] = match.group(1)
 
-    # Set default value "0%" for MaskRatio if not found
     if result["mask_ratio"] == "":
         result["mask_ratio"] = "0%"
 
@@ -67,14 +72,15 @@ def format_as_csv_row(data, keys=None):
         str: CSV formatted row
     """
     if keys is None:
-        keys = ["problem_size", "stages", "tile_shape", "grid_dims",
-                "hack_load_g2l", "disposition", "tflops", "iterations", 
-                "avg_runtime"]
+        keys = DEFAULT_KEYS
 
-    # Extract values in the order specified by keys
-    values = [data.get(key, "") for key in keys]
+    values = []
+    for key in keys:
+        value = data.get(key, "")
+        if "," in value:
+            value = f'"{value}"'
+        values.append(value)
 
-    # Return comma-separated values
     return ",".join(values)
 
 def get_csv_headers(keys=None):
@@ -88,11 +94,8 @@ def get_csv_headers(keys=None):
         str: CSV headers
     """
     if keys is None:
-        keys = ["problem_size", "stages", "tile_shape", "grid_dims",
-                "hack_load_g2l", "disposition", "tflops", "iterations", 
-                "avg_runtime"]
+        keys = DEFAULT_KEYS
 
-    # Map internal field names to display names
     field_display_names = {
         "problem_size": "ProblemSize",
         "stages": "Stages",
@@ -103,10 +106,10 @@ def get_csv_headers(keys=None):
         "tflops": "TFLOPS",
         "iterations": "Iterations",
         "avg_runtime": "AvgRuntime",
-        "mask_ratio": "MaskRatio"  # 添加MaskRatio的显示名称
+        "mask_ratio": "MaskRatio",
+        "scope_range": "ScopeRange"
     }
 
-    # Get display names for the specified keys
     headers = [field_display_names.get(key, key) for key in keys]
 
     return ",".join(headers)
@@ -120,36 +123,34 @@ def main():
     parser.add_argument("--csv-keys", type=str, help="Comma-separated list of keys for CSV output")
     parser.add_argument("--csv-headers", action="store_true",
                         help="Output only CSV headers (for table creation)")
+    parser.add_argument("--csv", action="store_true", help="Shortcut for --format csv")
 
     args = parser.parse_args()
 
-    # Get CSV keys if specified
+    if args.csv:
+        args.format = "csv"
+
     if args.csv_keys:
         keys = args.csv_keys.split(',')
     else:
         keys = None
 
-    # Output CSV headers only if requested
     if args.csv_headers:
         output = get_csv_headers(keys)
     else:
-        # Read input
         if args.input:
             with open(args.input, 'r') as f:
                 text = f.read()
         else:
             text = sys.stdin.read()
 
-        # Parse the text
         result = parse_test_output(text)
 
-        # Format output
         if args.format == "json":
             output = json.dumps(result, indent=2)
         else:  # csv
             output = format_as_csv_row(result, keys)
 
-    # Write output
     if args.output:
         with open(args.output, 'w') as f:
             f.write(output)

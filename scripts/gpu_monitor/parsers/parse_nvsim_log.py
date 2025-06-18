@@ -68,6 +68,13 @@ FIELDS = {
     }
 }
 
+# Define default metrics order used in multiple functions
+DEFAULT_METRICS = [
+    'GPUAveragePower', 'MemoryAveragePower', 'GPUInstantPower',
+    'GPUTemperature', 'MemoryTemperature', 'SMClocks', 'MemoryClocks',
+    'GPUUtilization', 'MemoryUtilization'
+]
+
 def parse_log_entry(entry):
     """Parse a single log entry, extract specified fields"""
     result = {}
@@ -297,11 +304,7 @@ def filter_idle_periods(data, utilization_field='GPUUtilization', retain_count=1
 def get_csv_headers(metrics=None, stats_types=None):
     """Get CSV headers for metrics with statistics types"""
     if metrics is None:
-        metrics = [
-            'SMClocks', 'MemoryClocks', 'GPUAveragePower', 'GPUInstantPower',
-            'MemoryAveragePower', 'GPUUtilization', 'MemoryUtilization',
-            'GPUTemperature', 'MemoryTemperature'
-        ]
+        metrics = DEFAULT_METRICS
 
     if stats_types is None:
         stats_types = ['meanStable', 'median', 'mean', 'max', 'min']
@@ -325,11 +328,7 @@ def get_csv_headers(metrics=None, stats_types=None):
 def format_stats_as_csv(data, metrics=None, stats_types=None):
     """Format statistics as CSV row"""
     if metrics is None:
-        metrics = [
-            'SMClocks', 'MemoryClocks', 'GPUAveragePower', 'GPUInstantPower',
-            'MemoryAveragePower', 'GPUUtilization', 'MemoryUtilization',
-            'GPUTemperature', 'MemoryTemperature'
-        ]
+        metrics = DEFAULT_METRICS
 
     if stats_types is None:
         stats_types = ['meanStable', 'median', 'mean', 'max', 'min']
@@ -356,11 +355,7 @@ def format_stats_as_csv(data, metrics=None, stats_types=None):
 
 def print_statistics(data):
     """Print statistics information to console"""
-    metrics = [
-        'SMClocks', 'MemoryClocks', 'GPUAveragePower', 'GPUInstantPower',
-        'MemoryAveragePower', 'GPUUtilization', 'MemoryUtilization',
-        'GPUTemperature', 'MemoryTemperature'
-    ]
+    metrics = DEFAULT_METRICS
 
     print("\nStatistics for key metrics:")
     print("-" * 80)
