@@ -19,8 +19,9 @@ SCRIPT_DIR=$(dirname "$0")
 PARSER_ROOT="$SCRIPT_DIR/parsers"
 
 # Initialize the CSV file with headers
-RESULTS_FILE="$OUTPUT_DIR/test_results.csv"
-echo -n "Executable,Frequency,MaskRatio," > "$RESULTS_FILE"
+DIR_NAME=$(basename "$OUTPUT_DIR")
+RESULTS_FILE="$OUTPUT_DIR/${DIR_NAME}_rollup_test_results.csv"
+echo -n "Executable,Frequency," > "$RESULTS_FILE"
 
 # Get headers from parse_console_log.py
 CONSOLE_HEADERS=$(python3 $PARSER_ROOT/parse_console_log.py --csv-headers)
@@ -47,28 +48,47 @@ find "$OUTPUT_DIR" -name "*_nvsmi.txt" | sort | while read nvsmi_file; do
 
     echo "Processing logs for: $base_name"
 
-    # Extract app name, frequency and mask from base_name
-    # Example: "70_blackwell_fp16_gemm_1005_mask0" -> app_name="70_blackwell_fp16_gemm", freq="1005", mask="0"
+    # Extract app name, frequency, mask and scope from base_name
+    # Example: "72c_blackwell_mxfp8_fp8_gemm_2x1x1_1005_mask0_scope0.5"
+    # -> app_name="72c_blackwell_mxfp8_fp8_gemm_2x1x1", freq="1005", mask="0", scope="0.5"
 
-    # Extract mask information from filename
-    if [[ $base_name =~ _mask([0-9]+)$ ]]; then
+    # Extract mask and scope information from filename
+    mask="NA"
+    scope="NA"
+
+    # Extract mask information (not necessarily at the end)
+    if [[ $base_name =~ _mask([0-9]+) ]]; then
         mask="${BASH_REMATCH[1]}"
-        # Remove _mask part to extract frequency
-        base_without_mask="${base_name%_mask$mask}"
+        # Don't remove mask part yet as we need to check for scope
+    else
+        echo "  ⚠️ No mask information found in filename"
+    fi
+
+    # Extract scope information if present
+    if [[ $base_name =~ _scope([0-9.]+) ]]; then
+        scope="${BASH_REMATCH[1]}"
+        # Remove scope part for further processing
+        base_without_scope="${base_name%_scope$scope}"
+    else
+        base_without_scope="$base_name"
+        echo "  ⚠️ No scope information found in filename"
+    fi
+
+    # Now extract frequency from the cleaned base name
+    if [[ $base_without_scope =~ _mask ]]; then
+        # Remove mask part to extract frequency
+        base_without_mask="${base_without_scope%_mask*}"
 
         # Extract frequency and app name from remaining part
         freq="${base_without_mask##*_}"
         app_name="${base_without_mask%_$freq}"
-
-        echo "  App: $app_name, Frequency: $freq, Mask: $mask"
     else
         # Old filename format without mask information
-        freq="${base_name##*_}"
-        app_name="${base_name%_$freq}"
-        mask="NA"
-
-        echo "  App: $app_name, Frequency: $freq, Mask: $mask (not specified)"
+        freq="${base_without_scope##*_}"
+        app_name="${base_without_scope%_$freq}"
     fi
+
+    echo "  App: $app_name, Frequency: $freq, Mask: $mask, Scope: $scope"
 
     # Get console log data in CSV format
     CONSOLE_DATA=$(python3 $PARSER_ROOT/parse_console_log.py --input "$perf_file" --format csv)
@@ -77,7 +97,7 @@ find "$OUTPUT_DIR" -name "*_nvsmi.txt" | sort | while read nvsmi_file; do
     NVSMI_DATA=$(python3 $PARSER_ROOT/parse_nvsim_log.py "$nvsmi_file" --csv)
 
     # Combine the results and append to CSV file - include mask information
-    echo "$app_name,$freq,$mask,$CONSOLE_DATA,$NVSMI_DATA" >> "$RESULTS_FILE"
+    echo "$app_name,$freq,$CONSOLE_DATA,$NVSMI_DATA" >> "$RESULTS_FILE"
 
     # Generate visualization plot from the CSV data
     CSV_FILE="${nvsmi_file%.txt}.csv"
