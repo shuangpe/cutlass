@@ -37,6 +37,8 @@ set(CUTLASS_BUILD_MONO_LIBRARY OFF CACHE BOOL
 
 ################################################################################
 
+option(HACK_GEMM_WRITE_SLM_ONCE "Enable HACK_GEMM_WRITE_SLM_ONCE definition" OFF)
+
 add_library(cutlass_library_includes INTERFACE)
 add_library(nvidia::cutlass::library::includes ALIAS cutlass_library_includes)
 set_target_properties(cutlass_library_includes PROPERTIES EXPORT_NAME library::includes)
@@ -54,6 +56,11 @@ target_link_libraries(
   CUTLASS
   cutlass_tools_util_includes
   )
+
+if(HACK_GEMM_WRITE_SLM_ONCE)
+  target_compile_definitions(cutlass_library_includes
+    INTERFACE CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1 SM100_DEBUG_MODE=1 DEBUG_BLOCK_ID=${HACK_GEMM_WRITE_SLM_ONCE})
+endif()
 
 install(
   TARGETS cutlass_library_includes
