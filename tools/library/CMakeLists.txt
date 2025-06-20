@@ -57,9 +57,12 @@ target_link_libraries(
   cutlass_tools_util_includes
   )
 
+
+# target_compile_definitions(cutlass_library_includes INTERFACE SM100_DEBUG_MODE=1 DEBUG_BLOCK_ID=2)
+
 if(HACK_GEMM_WRITE_SLM_ONCE)
   target_compile_definitions(cutlass_library_includes
-    INTERFACE CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1 SM100_DEBUG_MODE=1 DEBUG_BLOCK_ID=${HACK_GEMM_WRITE_SLM_ONCE})
+    INTERFACE CUTLASS_UNIT_TEST_PIPELINE=1 HACK_GEMM_WRITE_SLM_ONCE=1)
 endif()
 
 install(
