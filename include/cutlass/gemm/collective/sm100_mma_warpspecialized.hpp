@@ -645,10 +645,12 @@ struct CollectiveMma<
     );
 
 #if HACK_GEMM_WRITE_SLM_ONCE
-    auto cluster_layout_vmnk = tiled_divide(make_layout(cluster_shape_), make_tile(typename TiledMma::AtomThrID{}));    
-    uint32_t const per_cta_bytes =
-      cutlass::bits_to_bytes(cosize(take<0,3>(SmemLayoutA{})) * cute::sizeof_bits_v<ElementA>) / size<2>(cluster_layout_vmnk) +
-      cutlass::bits_to_bytes(cosize(take<0,3>(SmemLayoutB{})) * cute::sizeof_bits_v<ElementB>) / size<1>(cluster_layout_vmnk);
+    auto cluster_layout_vmnk = tiled_divide(make_layout(cluster_shape_), make_tile(typename TiledMma::AtomThrID{}));
+    uint32_t const per_cta_bytes_a =
+      cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutA{})) * cute::sizeof_bits_v<ElementA>) / size<2>(cluster_layout_vmnk);
+    uint32_t const per_cta_bytes_b =
+      cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutB{})) * cute::sizeof_bits_v<ElementB>) / size<1>(cluster_layout_vmnk);
+    uint32_t const per_cta_bytes = per_cta_bytes_a + per_cta_bytes_b;
     TRACE_LOAD(
       PRINT(mcast_mask_a);
       PRINT(mcast_mask_b);
@@ -669,7 +671,9 @@ struct CollectiveMma<
     while (k_tile_count > 0) {
       // LOCK mainloop_pipe_producer_state for _writing_
       TRACE_LOAD(
-        print("producer_acquire: stage="); print(mainloop_pipe_producer_state.index()); print("\n");
+        print("[TMA] producer_acquire: stage="); print(mainloop_pipe_producer_state.index());
+        print(" count="); print(mainloop_pipe_producer_state.count());
+        print(" k_tile_count="); print(k_tile_count); print("\n");
       );
       mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state, barrier_token);
 
@@ -696,7 +700,35 @@ struct CollectiveMma<
         TRACE_LOAD(
           print("producer_commit: stage="); print(curr_mainloop_pipe_producer_state.index());print(" per_cta_bytes=");print(per_cta_bytes); print("\n");
         );
-        mainloop_pipeline.producer_commit(curr_mainloop_pipe_producer_state, per_cta_bytes);
+        // mainloop_pipeline.producer_commit(curr_mainloop_pipe_producer_state, TmaTransactionBytes);
+
+        auto const& params_ = mainloop_pipeline.impl_.params_;
+        uint32_t stage = curr_mainloop_pipe_producer_state.index();
+        auto const& full_barrier_ptr_ = mainloop_pipeline.impl_.full_barrier_ptr_;
+
+        if (params_.is_leader) {
+          // STEP 1 : Commit to self
+          full_barrier_ptr_[stage].complete_transaction(per_cta_bytes_a+per_cta_bytes_b);
+
+          // STEP 2 : Commit to other blocks in our cluster
+          dim3 local_block_id = cute::block_id_in_cluster();
+          uint32_t peer_id = local_block_id.x % size<0>(cluster_layout_vmnk);
+          uint32_t local_block_id_m = local_block_id.x / size<0>(cluster_layout_vmnk);
+
+          CUTLASS_PRAGMA_UNROLL
+          for(int n = 0; n < size<2>(cluster_layout_vmnk); ++n) {
+            uint32_t dst_block_id = cluster_layout_vmnk(peer_id,local_block_id_m,n,Int<0>{});
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id, per_cta_bytes_a, n!=local_block_id.y);
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id+1, per_cta_bytes_a);
+          }
+
+          CUTLASS_PRAGMA_UNROLL
+          for(int m = 0; m < size<1>(cluster_layout_vmnk); ++m) {
+            uint32_t dst_block_id = cluster_layout_vmnk(peer_id,m,local_block_id.y,Int<0>{});
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id, per_cta_bytes_b, m!=local_block_id_m);
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id+1, per_cta_bytes_b);
+          }
+        }
       }
 #endif
 
@@ -759,17 +791,13 @@ struct CollectiveMma<
     CUTLASS_PRAGMA_NO_UNROLL
     while (k_tile_count > 0) {
       TRACE_MMA(
-        print("consumer_wait: stage="); print(mainloop_pipe_consumer_state.index()); print("\n");
+        print("[MMA] consumer_wait: stage="); print(mainloop_pipe_consumer_state.index());
+        print(" count="); print(mainloop_pipe_consumer_state.count());
+        print(" k_tile_count="); print(k_tile_count); print("\n");
       );
       // WAIT on mainloop_pipe_consumer_state until its data are available
       // (phase bit flips from mainloop_pipe_consumer_state.phase() value)
       mainloop_pipeline.consumer_wait(mainloop_pipe_consumer_state, barrier_token);
-
-      TRACE_MMA(
-        PRINT(mainloop_pipe_consumer_state.count());
-        PRINT(mainloop_pipe_consumer_state.index());
-        PRINT(k_tile_count);
-      );
 
       // Compute on k_tile
       int read_stage = mainloop_pipe_consumer_state.index();
@@ -781,9 +809,6 @@ struct CollectiveMma<
       --k_tile_count;
       skip_wait = k_tile_count <= 0;
       // Peek at next iteration
-      TRACE_MMA(
-        print("consumer_try_wait: stage="); print(mainloop_pipe_consumer_state.index()); print("\n");
-      );
       barrier_token = mainloop_pipeline.consumer_try_wait(mainloop_pipe_consumer_state, skip_wait);
 
       // Unroll the K mode manually so we can set scale C to 1
@@ -796,9 +821,6 @@ struct CollectiveMma<
                    accumulators);
         tiled_mma.accumulate_ = UMMA::ScaleOut::One;
       }
-      TRACE_MMA(
-        print("consumer_release: stage="); print(curr_mainloop_pipe_consumer_state.index()); print("\n");
-      );
       mainloop_pipeline.consumer_release(curr_mainloop_pipe_consumer_state);
     }
 
