@@ -793,6 +793,16 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist) {
   }
 
   std::vector<uint8_t> host_data(bytes());
+  
+  auto copy_tiles = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
+    std::cout << "Copy tiles with rows=" << rows << " cols=" << cols << std::endl;
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+          if (r < row_tile && c < col_tile) continue;
+          data[r * cols + c] = data[(r%row_tile) * cols + (c%col_tile)];
+        }
+      }
+  };
 
   switch (type_) {
   case library::NumericTypeID::kFE4M3:
@@ -860,6 +870,21 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist) {
       seed,
       dist
     );
+    if (name_ == "A") {
+      auto host_ptr = reinterpret_cast<cutlass::half_t *>(host_data.data());
+      if (layout_ == library::LayoutTypeID::kRowMajor) {
+        copy_tiles(host_ptr, extent_[0], extent_[1], 256, 256);
+      } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+        copy_tiles(host_ptr, extent_[1], extent_[0], 256, 256);
+      }
+    } else if (name_ == "B") {
+      auto host_ptr = reinterpret_cast<cutlass::half_t *>(host_data.data());
+      if (layout_ == library::LayoutTypeID::kRowMajor) {
+        copy_tiles(host_ptr, extent_[0], extent_[1], 256, 256);
+      } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+        copy_tiles(host_ptr, extent_[1], extent_[0], 256, 256);
+      }      
+    }
     break;
   case library::NumericTypeID::kBF16:
     cutlass::reference::host::BlockFillRandom<cutlass::bfloat16_t>(
