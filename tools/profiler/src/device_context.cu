@@ -50,6 +50,7 @@ DeviceAllocation *DeviceContext::allocate_block(
   int device = options.device.device_id(device_index);
   device_memory_.emplace_back(type, capacity, device);
   DeviceAllocation *allocation = &device_memory_.back();
+  allocation->name_ = name;
 
   allocations_[name] = allocation;
   return allocation;
@@ -70,6 +71,7 @@ DeviceAllocation *DeviceContext::allocate_tensor(
   device_memory_.emplace_back(type, layout_id, extent, stride, batch_count,
                               device);
   DeviceAllocation *allocation = &device_memory_.back();
+  allocation->name_ = name;
 
   allocations_[name] = allocation;
   return allocation;
@@ -80,7 +82,20 @@ static void initialize_allocation_with_data_distribution(
   int seed_shift,
   DeviceAllocation *allocation,
   Distribution &data_distribution) {
-  if (options.initialization.provider == library::Provider::kReferenceDevice) {
+
+  if (allocation->name_ == "A" || allocation->name_ == "B") {
+    if (data_distribution.kind == Distribution::Sequential) {
+      allocation->initialize_sequential_host(
+        data_distribution);
+    }
+    else {
+      std::cout << "Initializing " << allocation->name_ << " with initialize_random_host()" << std::endl;
+      allocation->initialize_random_host(
+        options.initialization.seed + seed_shift,
+        data_distribution);
+    }    
+  }
+  else if (options.initialization.provider == library::Provider::kReferenceDevice) {
     if (data_distribution.kind == Distribution::Sequential) {
       allocation->initialize_sequential_device(
         data_distribution);

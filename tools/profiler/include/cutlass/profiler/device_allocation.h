@@ -85,6 +85,9 @@ private:
   int device_;
 
 public:
+  std::string name_;
+
+public:
   //
   // Static member functions
   //
