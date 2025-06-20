@@ -7,3 +7,5 @@ cutlass_library.egg-info/
 *.png
 **/freq_logs*
 **/scripts*
+debug_build/*
+debug_build2/*
