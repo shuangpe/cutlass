@@ -603,6 +603,11 @@ struct CollectiveMma<
   }
 
 #if HACK_GEMM_WRITE_SLM_ONCE
+#if CUTLASS_UNIT_TEST_PIPELINE
+#else
+  #error "Must define CUTLASS_UNIT_TEST_PIPELIN=true when HACK_GEMM_WRITE_SLM_ONCE is enabled."
+#endif
+
   uint32_t smem_pipe_write_count = 0;
   uint32_t smem_pipe_read_count = 0;
 #endif
@@ -639,33 +644,61 @@ struct CollectiveMma<
       print(") gridDim=("); print(gridDim.x); print(", "); print(gridDim.y); print(", "); print(gridDim.z); print(")\n");
     );
 
+#if HACK_GEMM_WRITE_SLM_ONCE
+    auto cluster_layout_vmnk = tiled_divide(make_layout(cluster_shape_), make_tile(typename TiledMma::AtomThrID{}));    
+    uint32_t const per_cta_bytes =
+      cutlass::bits_to_bytes(cosize(take<0,3>(SmemLayoutA{})) * cute::sizeof_bits_v<ElementA>) / size<2>(cluster_layout_vmnk) +
+      cutlass::bits_to_bytes(cosize(take<0,3>(SmemLayoutB{})) * cute::sizeof_bits_v<ElementB>) / size<1>(cluster_layout_vmnk);
+    TRACE_LOAD(
+      PRINT(mcast_mask_a);
+      PRINT(mcast_mask_b);
+      PRINT(AtomThrShapeMNK{});
+      PRINT(SmemLayoutA{});
+      PRINT(SmemLayoutB{});
+      PRINT(cosize(take<0,3>(SmemLayoutA{})));
+      PRINT(cosize(take<0,3>(SmemLayoutB{})));
+      PRINT(cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutA{})) * cute::sizeof_bits_v<ElementA>));
+      PRINT(cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutB{})) * cute::sizeof_bits_v<ElementB>));
+      PRINT(TmaTransactionBytes);
+      print("cluster_layout_vmnk=");print(cluster_layout_vmnk); print(" per_cta_bytes="); print(per_cta_bytes); print("\n");
+    );
+#endif
+
     // Issue the Mainloop loads
     CUTLASS_PRAGMA_NO_UNROLL
     while (k_tile_count > 0) {
       // LOCK mainloop_pipe_producer_state for _writing_
-      mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state, barrier_token);
-
       TRACE_LOAD(
-        print("producer_acquire: stage="); print(mainloop_pipe_producer_state.index());
-        print(" smem_pipe_write_count="); print(smem_pipe_write_count);
-        print(" count="); print(mainloop_pipe_producer_state.count());
-        print(" k_tile_count="); print(k_tile_count); print("\n");
+        print("producer_acquire: stage="); print(mainloop_pipe_producer_state.index()); print("\n");
       );
+      mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state, barrier_token);
 
       using BarrierType = typename MainloopPipeline::ProducerBarrierType;
       BarrierType* tma_barrier = mainloop_pipeline.producer_get_barrier(mainloop_pipe_producer_state);
+
+#if HACK_GEMM_WRITE_SLM_ONCE
+      auto curr_mainloop_pipe_producer_state = mainloop_pipe_producer_state;
+#endif
 
       int write_stage = mainloop_pipe_producer_state.index();
       ++mainloop_pipe_producer_state;
       barrier_token = mainloop_pipeline.producer_try_acquire(mainloop_pipe_producer_state);
 
-      if (cute::elect_one_sync()) {
 #if HACK_GEMM_WRITE_SLM_ONCE
-      if (++smem_pipe_write_count > MainloopPipeline::Stages) continue;
+      if (++smem_pipe_write_count <= MainloopPipeline::Stages) {
 #endif
+      if (cute::elect_one_sync()) {
         copy(observed_tma_load_a_->with(*tma_barrier, mcast_mask_a), tAgA(_,*k_tile_iter), tAsA(_,write_stage));
         copy(observed_tma_load_b_->with(*tma_barrier, mcast_mask_b), tBgB(_,*k_tile_iter), tBsB(_,write_stage));
       }
+#if HACK_GEMM_WRITE_SLM_ONCE
+      } else {
+        TRACE_LOAD(
+          print("producer_commit: stage="); print(curr_mainloop_pipe_producer_state.index());print(" per_cta_bytes=");print(per_cta_bytes); print("\n");
+        );
+        mainloop_pipeline.producer_commit(curr_mainloop_pipe_producer_state, per_cta_bytes);
+      }
+#endif
 
       --k_tile_count;
       ++k_tile_iter;
@@ -725,21 +758,17 @@ struct CollectiveMma<
 
     CUTLASS_PRAGMA_NO_UNROLL
     while (k_tile_count > 0) {
+      TRACE_MMA(
+        print("consumer_wait: stage="); print(mainloop_pipe_consumer_state.index()); print("\n");
+      );
       // WAIT on mainloop_pipe_consumer_state until its data are available
       // (phase bit flips from mainloop_pipe_consumer_state.phase() value)
-#if HACK_GEMM_WRITE_SLM_ONCE
-      bool initialize_done = ++smem_pipe_write_count > MainloopPipeline::Stages;
-      if (!initialize_done) {
-#endif
       mainloop_pipeline.consumer_wait(mainloop_pipe_consumer_state, barrier_token);
-#if HACK_GEMM_WRITE_SLM_ONCE
-      }
-#endif
+
       TRACE_MMA(
-        print("consumer_wait: stage="); print(mainloop_pipe_consumer_state.index());
-        print(" count="); print(mainloop_pipe_consumer_state.count());
-        print(" initialize_done="); print(initialize_done);
-        print(" k_tile_count="); print(k_tile_count); print("\n");
+        PRINT(mainloop_pipe_consumer_state.count());
+        PRINT(mainloop_pipe_consumer_state.index());
+        PRINT(k_tile_count);
       );
 
       // Compute on k_tile
@@ -752,6 +781,9 @@ struct CollectiveMma<
       --k_tile_count;
       skip_wait = k_tile_count <= 0;
       // Peek at next iteration
+      TRACE_MMA(
+        print("consumer_try_wait: stage="); print(mainloop_pipe_consumer_state.index()); print("\n");
+      );
       barrier_token = mainloop_pipeline.consumer_try_wait(mainloop_pipe_consumer_state, skip_wait);
 
       // Unroll the K mode manually so we can set scale C to 1
@@ -764,6 +796,9 @@ struct CollectiveMma<
                    accumulators);
         tiled_mma.accumulate_ = UMMA::ScaleOut::One;
       }
+      TRACE_MMA(
+        print("consumer_release: stage="); print(curr_mainloop_pipe_consumer_state.index()); print("\n");
+      );
       mainloop_pipeline.consumer_release(curr_mainloop_pipe_consumer_state);
     }
 
