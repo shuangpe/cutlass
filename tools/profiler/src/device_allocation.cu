@@ -812,6 +812,22 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist) {
       seed,
       dist
     );
+
+    if (name_ == "A") {
+      auto host_ptr = reinterpret_cast<cutlass::float_e4m3_t *>(host_data.data());
+      if (layout_ == library::LayoutTypeID::kRowMajor) {
+        copy_tiles(host_ptr, extent_[0], extent_[1], 256, 256);
+      } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+        copy_tiles(host_ptr, extent_[1], extent_[0], 256, 256);
+      }
+    } else if (name_ == "B") {
+      auto host_ptr = reinterpret_cast<cutlass::float_e4m3_t *>(host_data.data());
+      if (layout_ == library::LayoutTypeID::kRowMajor) {
+        copy_tiles(host_ptr, extent_[0], extent_[1], 256, 256);
+      } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+        copy_tiles(host_ptr, extent_[1], extent_[0], 256, 256);
+      }
+    }
     break;
   case library::NumericTypeID::kFE5M2:
     cutlass::reference::host::BlockFillRandom<cutlass::float_e5m2_t>(
