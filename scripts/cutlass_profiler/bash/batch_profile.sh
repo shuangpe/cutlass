@@ -159,12 +159,12 @@ profile_kernel() {
     echo -ne "\r"
   fi
 
-  local output=${OUTPUT_DIR}/${kernel_name}_${freq}_mask${mask_ratio}_scope${scope}_${profile_type}
-  log_info "./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --kernel ${kernel_name} --operation ${operation}"
+  local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}
+  log_info "./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation}"
 
   if [ "$DRY_RUN" = "false" ]; then
     nvsmi_log start
-    ./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --kernel ${kernel_name} --operation ${operation} --output ${output}
+    ./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --output ${output}
     nvsmi_log stop
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
