@@ -66,7 +66,7 @@ check_all_configs() {
   done
 
   # Calculate total number of runs
-  total_runs=$((${#mode[@]} * ${#freq[@]} * ${#kernel_array[@]} * ${#init_scope[@]} * ${#mask_ratios[@]}))
+  total_runs=$((${#mode[@]} * ${#freq[@]} * ${#kernel_array[@]} * ${#scope[@]} * ${#mask_ratios[@]}))
   log_info "Total runs: $total_runs"
 }
 
@@ -144,7 +144,7 @@ profile_kernel() {
   # Display progress
   local progress=$((current_run * 100 / total_runs))
   log_info "-----------------------------------------------------------------------"
-  log_info "Progress: [$current_run/$total_runs] ${progress}% - (freq=${freq} kernel=${kernel_name} op=${operation} mask_ratio=$mask_ratio, scope=$scope)"
+  log_info "Progress: [$current_run/$total_runs] ${progress}% - (freq=${freq} mask_ratio=$mask_ratio scope=$scope type=${profile_type} kernel=${kernel_name})"
 
   # Prepare countdown
   if [ ${start_delay:-0} -gt 0 ]; then
@@ -218,7 +218,7 @@ apply_frequency_and_run() {
     for kernel_tuple in "${kernel_array[@]}"; do
       IFS=',' read -r kernel_name operation <<< "$kernel_tuple"
       for scope in $init_scope; do
-        for mask_ratio in $mask_ratios; do
+        for mask_ratio in "${mask_ratios[@]}"; do
           current_run=$((current_run + 1))
           profile_kernel "$kernel_name" "$operation" "$mask_ratio" "$scope" "$freq_value" "$current_run" "$total_runs" "$profile_type"
         done
