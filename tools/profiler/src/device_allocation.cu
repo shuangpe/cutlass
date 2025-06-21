@@ -796,7 +796,7 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
 
   auto random_zeros = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
     if (mask_ratio == 0) {
-      std::cout << "Random zeros (rows=" << rows << " cols=" << cols << " mask_ratio=" << mask_ratio << ")" << std::endl;
+      std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio << ")" << std::endl;
       return;
     }
 
@@ -816,22 +816,21 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
       data[r * cols + c] = static_cast<typename std::remove_pointer_t<decltype(data)>>(0.0);
     }
 
-    std::cout << "Random zeros (rows=" << rows << " cols=" << cols << " mask_ratio=" << mask_ratio << " num_zeros=" << num_zeros << ")" << std::endl;
+    std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio << " num_zeros=" << num_zeros << ")" << std::endl;
   };
 
   auto copy_tiles = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
-    std::cout << "Copy tiles with rows=" << rows << " cols=" << cols << std::endl;
-
     // Fill the first tile with random zeros
     random_zeros(data, rows, cols, row_tile, col_tile);
 
     // Fill the rest of the matrix by copying from the tile
     for (int r = 0; r < rows; ++r) {
-        for (int c = 0; c < cols; ++c) {
-          if (r < row_tile && c < col_tile) continue;
-          data[r * cols + c] = data[(r%row_tile) * cols + (c%col_tile)];
-        }
+      for (int c = 0; c < cols; ++c) {
+        if (r < row_tile && c < col_tile) continue;
+        data[r * cols + c] = data[(r%row_tile) * cols + (c%col_tile)];
       }
+    }
+    std::cout << "Copy tiles in matrix (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << ")" << std::endl;
   };
 
   switch (type_) {
