@@ -92,7 +92,7 @@ static void initialize_allocation_with_data_distribution(
       std::cout << "Initializing " << allocation->name_ << " with initialize_random_host()" << std::endl;
       allocation->initialize_random_host(
         options.initialization.seed + seed_shift,
-        data_distribution);
+        data_distribution, options.initialization.mask_ratio);
     }    
   }
   else if (options.initialization.provider == library::Provider::kReferenceDevice) {

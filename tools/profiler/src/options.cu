@@ -277,6 +277,7 @@ Options::Initialization::Initialization(cutlass::CommandLine const &cmdline) {
   }
 
   cmdline.get_cmd_line_argument("seed", seed, 2019);
+  cmdline.get_cmd_line_argument("mask_ratio", mask_ratio, 0);
 
   if (cmdline.check_cmd_line_flag("dist")) {
     // user has set the data distribution (fix data distribution once set)
