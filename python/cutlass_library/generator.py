@@ -8354,7 +8354,7 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
     for data_type in data_types:
       if (data_type["c_type"] != DataType.void):
         continue
-      if (data_type["d_type"] != DataType.e4m3):
+      if (data_type["d_type"] != DataType.e4m3 and data_type["d_type"] != DataType.f32):
         continue
       if ( data_type["a_type"] != DataType.e4m3 or data_type["b_type"] != DataType.e4m3):
         continue
@@ -8737,7 +8737,9 @@ def GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_versio
       for data_type in data_types:
         if ( data_type["a_type"] != DataType.e2m1 or data_type["b_type"] != DataType.e2m1):
           continue
-        if ( data_type["c_type"] != DataType.void or data_type["d_type"] != DataType.e2m1):
+        # if (data_type["c_type"] != DataType.void):
+        #   continue
+        if (data_type["d_type"] != DataType.e2m1):
           continue
         if data_type["sfd_type"]["type"] != DataType.ue4m3:
           continue
