@@ -11,6 +11,7 @@ while [[ "$#" -gt 0 ]]; do
     --mask_ratio|-mr) mask_ratio="$2"; shift ;;
     --operation|-op) operation="$2"; shift ;;
     --output|-o) output_path="$2"; shift ;;
+    --tags|-t) tags="$2"; shift ;;
     *) echo "Unknown parameter passed: $1"; exit 1 ;;
   esac
   shift
@@ -22,6 +23,14 @@ kernel=${kernel:-*}
 output_path=${output_path:-output}
 mask_ratio=${mask_ratio:-0}
 
+optional_args=""
+if [[ -n "$operation" ]]; then
+  optional_args="${optional_args} --operation=$operation"
+fi
+if [[ -n "$tags" ]]; then
+  optional_args="${optional_args} --tags=$tags"
+fi
+
 if [[ "$mode" -eq 0 ]]; then
   profiler_app="before_hacking/tools/profiler/cutlass_profiler"
 else
@@ -29,8 +38,8 @@ else
 fi
 
 ${root_dir}/$profiler_app \
-  --operation=${operation} --kernels=${kernel} --m=16384 --n=16384 --k=16384 --providers=cutlass \
+  --kernels=${kernel} --m=16384 --n=16384 --k=16384 --providers=cutlass \
   --sleep-duration=3000 --warmup-iterations=500 --profiling-iterations=2000 \
   --print-kernel-before-running=true --verification-enabled=false \
   --dist=uniform,min:-${scope},max:${scope} --mask_ratio=${mask_ratio} \
-  --output="${output_path}.csv" 2>&1 | tee -a "${output_path}.log.txt"
+  --output="${output_path}.csv" ${optional_args} 2>&1 | tee -a "${output_path}.log.txt"

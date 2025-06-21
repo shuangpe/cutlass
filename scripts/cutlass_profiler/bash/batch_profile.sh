@@ -160,11 +160,12 @@ profile_kernel() {
   fi
 
   local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}
-  log_info "./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation}"
+  local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio}"
+  log_info "./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output}"
 
   if [ "$DRY_RUN" = "false" ]; then
     nvsmi_log start
-    ./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --output ${output}
+    ./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output}
     nvsmi_log stop
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
