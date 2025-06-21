@@ -524,6 +524,9 @@ struct CollectiveMma<
     auto problem_shape_MNKL = append<4>(problem_shape, 1);
     auto [M,N,K,L] = problem_shape_MNKL;
 
+    // auto x = Sm1xxBlkScaledConfig::deduce_smem_layoutSFA(TiledMma{}, TileShape{});
+    // auto y = Sm1xxBlkScaledConfig::deduce_smem_layoutSFB(TiledMma{}, TileShape{});
+
     auto ptr_A = recast_ptr<TmaInternalElementA>(args.ptr_A);
     auto ptr_B = recast_ptr<TmaInternalElementB>(args.ptr_B);
 
@@ -826,6 +829,18 @@ struct CollectiveMma<
     uint16_t mcast_mask_sfa = create_tma_multicast_mask<2>(cta_layout_vmnk, cta_coord_vmnk);
     uint16_t mcast_mask_sfb = create_tma_multicast_mask<1>(cta_layout_sfb_vmnk, cta_coord_sfb_vmnk);
 
+    TRACE_LOAD(
+      PRINT(cta_layout_mnk);
+      PRINT(cta_layout_vmnk);
+      PRINT(cta_coord_vmnk);
+      PRINT(cta_layout_sfb_vmnk);
+      PRINT(cta_coord_sfb_vmnk);
+      PRINT(mcast_mask_a);
+      PRINT(mcast_mask_b);
+      PRINT(mcast_mask_sfa);
+      PRINT(mcast_mask_sfb);
+    );
+
     return LoadParams{
       size<3>(gA_mkl),                                            // for scheduler
       tAgA_mkl, tBgB_nkl, tAsA, tBsB,                             // for input tensor values
@@ -934,31 +949,52 @@ struct CollectiveMma<
       print(") gridDim=("); print(gridDim.x); print(", "); print(gridDim.y); print(", "); print(gridDim.z); print(")\n");
       PRINT(CtaShape_MNK{});
       PRINT(TileShape_SF{});
+      PRINT(AtomThrShapeMNK{});
+      PRINT(mcast_mask_a);
+      PRINT(mcast_mask_b);
+      PRINT(mcast_mask_sfa);
+      PRINT(mcast_mask_sfb);
       PRINT(SmemLayoutA{});
       PRINT(SmemLayoutB{});
       PRINT(SmemLayoutSFA{});
       PRINT(SmemLayoutSFB{});
+      PRINT(tAsA(_,0));
+      PRINT(tAsSFA(_,0));
+      PRINT(tBsB(_,0));
+      PRINT(tBsSFB(_,0));
     );
 
 #if HACK_GEMM_WRITE_SLM_ONCE
     auto cluster_layout_vmnk = tiled_divide(make_layout(cluster_shape_), make_tile(typename TiledMma::AtomThrID{}));
+    auto cta_layout_sfb_vmnk = tiled_divide(make_layout(cluster_shape_), make_tile(typename TiledMMA_SF::AtomThrID{}));
+
     uint32_t const per_cta_bytes_a =
       cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutA{})) * cute::sizeof_bits_v<ElementA>) / size<2>(cluster_layout_vmnk);
     uint32_t const per_cta_bytes_b =
       cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutB{})) * cute::sizeof_bits_v<ElementB>) / size<1>(cluster_layout_vmnk);
+    uint32_t const per_cta_bytes_sfa =
+      cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutSFA{})) * cute::sizeof_bits_v<ElementSF>) / size<2>(cluster_layout_vmnk);
+    uint32_t const per_cta_bytes_sfb =
+      cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutSFB{})) * cute::sizeof_bits_v<ElementSF>) / size<1>(cluster_layout_vmnk);
+
     uint32_t const per_cta_bytes = per_cta_bytes_a + per_cta_bytes_b;
     TRACE_LOAD(
-      PRINT(mcast_mask_a);
-      PRINT(mcast_mask_b);
-      PRINT(AtomThrShapeMNK{});
-      PRINT(SmemLayoutA{});
-      PRINT(SmemLayoutB{});
       PRINT(cosize(take<0,3>(SmemLayoutA{})));
       PRINT(cosize(take<0,3>(SmemLayoutB{})));
+      PRINT(cosize(take<0,3>(SmemLayoutSFA{})));
+      PRINT(cosize(take<0,3>(SmemLayoutSFB{})));
+      PRINT(cute::sizeof_bits_v<ElementSF>);
       PRINT(cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutA{})) * cute::sizeof_bits_v<ElementA>));
       PRINT(cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutB{})) * cute::sizeof_bits_v<ElementB>));
+      PRINT(cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutSFA{})) * cute::sizeof_bits_v<ElementSF>));
+      PRINT(cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutSFB{})) * cute::sizeof_bits_v<ElementSF>));
+      PRINT(ABTmaTransactionBytes);
+      PRINT(SFTransactionBytes);
       PRINT(TmaTransactionBytes);
-      print("cluster_layout_vmnk=");print(cluster_layout_vmnk); print(" per_cta_bytes="); print(per_cta_bytes); print("\n");
+      print("cluster_layout_vmnk=");print(cluster_layout_vmnk);
+      print(" per_cta_bytes_a="); print(per_cta_bytes_a);
+      print(" per_cta_bytes_b="); print(per_cta_bytes_b);
+      print(" per_cta_bytes="); print(per_cta_bytes); print("\n");
     );
 #endif
 
@@ -999,18 +1035,13 @@ struct CollectiveMma<
       }
 #if HACK_GEMM_WRITE_SLM_ONCE
       } else {
-        if (cute::elect_one_sync()) {
-          copy(observed_tma_load_sfa_->with(*tma_barrier, mcast_mask_sfa), tAgSFA(_,*k_tile_iter), tAsSFA(_,write_stage));
-          copy(observed_tma_load_sfb_->with(*tma_barrier, mcast_mask_sfb), tBgSFB(_,*k_tile_iter), tBsSFB(_,write_stage));
-        }
-
         auto const& params_ = mainloop_pipeline.impl_.params_;
         uint32_t stage = curr_mainloop_pipe_producer_state.index();
         auto const& full_barrier_ptr_ = mainloop_pipeline.impl_.full_barrier_ptr_;
 
         if (params_.is_leader) {
           // STEP 1 : Commit to self
-          full_barrier_ptr_[stage].complete_transaction(per_cta_bytes_a+per_cta_bytes_b);
+          full_barrier_ptr_[stage].complete_transaction(per_cta_bytes_a+per_cta_bytes_b+per_cta_bytes_sfa+per_cta_bytes_sfb);
 
           // STEP 2 : Commit to other blocks in our cluster
           dim3 local_block_id = cute::block_id_in_cluster();
@@ -1019,18 +1050,16 @@ struct CollectiveMma<
 
           CUTLASS_PRAGMA_UNROLL
           for(int n = 0; n < size<2>(cluster_layout_vmnk); ++n) {
-            for (int i = 0; i < size(typename TiledMma::AtomThrID{}); ++i) {
-              uint32_t dst_block_id = cluster_layout_vmnk(i,local_block_id_m,n,Int<0>{});
-              full_barrier_ptr_[stage].complete_transaction(dst_block_id, per_cta_bytes_a, i!=local_peer_id && n!=local_block_id.y);
-            }
+            uint32_t dst_block_id = cluster_layout_vmnk(Int<0>{},local_block_id_m,n,Int<0>{});
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id, per_cta_bytes_a+per_cta_bytes_sfa, n!=local_block_id.y);
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id+1, per_cta_bytes_a+per_cta_bytes_sfa);
           }
 
           CUTLASS_PRAGMA_UNROLL
           for(int m = 0; m < size<1>(cluster_layout_vmnk); ++m) {
-            for (int i = 0; i < size(typename TiledMma::AtomThrID{}); ++i) {
-              uint32_t dst_block_id = cluster_layout_vmnk(i,m,local_block_id.y,Int<0>{});
-              full_barrier_ptr_[stage].complete_transaction(dst_block_id, per_cta_bytes_b,  i!=local_peer_id && m!=local_block_id_m);
-            }
+            uint32_t dst_block_id = cluster_layout_vmnk(Int<0>{},m,local_block_id.y,Int<0>{});
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id, per_cta_bytes_b+per_cta_bytes_sfb, m!=local_block_id_m);
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id+1, per_cta_bytes_b+per_cta_bytes_sfb);
           }
         }
       }
