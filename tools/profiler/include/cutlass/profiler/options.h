@@ -139,6 +139,9 @@ public:
     /// Random number generator seed.
     int seed;
 
+    /// Zero Mask Ratio
+    int mask_ratio;
+
     //
     // Methods
     //
