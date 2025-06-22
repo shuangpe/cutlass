@@ -8737,11 +8737,11 @@ def GenerateSM100_TensorOp_fp4_UMMA_gemm_with_block_scaled(manifest, cuda_versio
       for data_type in data_types:
         if ( data_type["a_type"] != DataType.e2m1 or data_type["b_type"] != DataType.e2m1):
           continue
-        # if (data_type["c_type"] != DataType.void):
-        #   continue
-        if (data_type["d_type"] != DataType.e2m1):
+        if (data_type["c_type"] != DataType.void):
           continue
-        if data_type["sfd_type"]["type"] != DataType.ue4m3:
+        if (data_type["d_type"] != DataType.e2m1 and data_type["d_type"] != DataType.f32):
+          continue
+        if (data_type["sfd_type"]["type"] != DataType.ue4m3 and data_type["sfd_type"]["type"] != DataType.void):
           continue
         if (data_type["sfd_type"]["type"] != DataType.void) and (data_type["d_type"] == DataType.e2m1) and (layout[2][0] == LayoutType.RowMajor):
           data_type["sfd_type"]["layout"] = layout[2][0] # For FP4 output , the scalefactor layout is same layout as D layout.
