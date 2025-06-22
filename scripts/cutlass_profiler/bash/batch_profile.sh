@@ -143,8 +143,15 @@ profile_kernel() {
 
   # Display progress
   local progress=$((current_run * 100 / total_runs))
-  log_info "-----------------------------------------------------------------------"
-  log_info "Progress: [$current_run/$total_runs] ${progress}% - (freq=${freq} mask_ratio=$mask_ratio scope=$scope type=${profile_type} kernel=${kernel_name})"
+  local bar_length=20
+  local filled_length=$((progress * bar_length / 100))
+  local bar=""
+  for ((i=0; i<filled_length; i++)); do
+    bar+="#"
+  done
+  for ((i=filled_length; i<bar_length; i++)); do
+    bar+="-"
+  done
 
   # Prepare countdown
   if [ ${start_delay:-0} -gt 0 ]; then
@@ -185,8 +192,11 @@ profile_kernel() {
   local avg_time_fmt=$(format_time $avg_time)
   local est_remaining=$(format_time $estimated_remaining_time)
 
-  # Log completion status with timing information
-  log_info "Duration: ${task_time} | Avg: ${avg_time_fmt} | Est. remaining: ${est_remaining}"
+  local now_time=$(date +%s)
+  local total_elapsed_sec=$((now_time - start_time))
+  local total_elapsed_fmt=$(format_time $total_elapsed_sec)
+
+  log_info "Progress: [${current_run}/${total_runs} ${bar}] Elapsed: ${total_elapsed_fmt} | Est. remaining: ${est_remaining} | Avg Task: ${avg_time_fmt}"
 }
 
 # Apply frequency and run kernel analysis
