@@ -245,7 +245,7 @@ def calculate_statistics(data, field, stats_types=None):
 
     return stats
 
-def filter_idle_periods(data, utilization_field='GPUUtilization', retain_count=1):
+def filter_idle_periods(data, utilization_field='GPUUtilization', retain_count=0):
     """
     Filter out consecutive GPU utilization records with 0% usage at the beginning and end,
     but retain a specified number of idle records for reference.
@@ -389,7 +389,7 @@ def main():
     parser.add_argument("path", nargs='?', help="Log file path or directory containing log files")
     parser.add_argument("--csv", action="store_true", help="Output statistics in CSV format to terminal")
     parser.add_argument("--csv-headers", action="store_true", help="Output only CSV headers")
-    parser.add_argument("--stats-type", choices=["median", "mean", "max", "min"], nargs="+",
+    parser.add_argument("--stats-type", choices=["median", "mean", "max", "min", 'meanStable'], nargs="+",
                       help="Specify statistics types to include (default: all)")
 
     args = parser.parse_args()
