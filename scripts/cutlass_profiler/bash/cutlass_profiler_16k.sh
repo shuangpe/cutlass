@@ -12,6 +12,8 @@ while [[ "$#" -gt 0 ]]; do
     --operation|-op) operation="$2"; shift ;;
     --output|-o) output_path="$2"; shift ;;
     --tags|-t) tags="$2"; shift ;;
+    --warmup-iterations|-wi) warmup_iterations="$2"; shift ;;
+    --profiling-iterations|-pi) profiling_iterations="$2"; shift ;;
     *) echo "Unknown parameter passed: $1"; exit 1 ;;
   esac
   shift
@@ -22,6 +24,8 @@ scope=${scope:-5}
 kernel=${kernel:-*}
 output_path=${output_path:-output}
 mask_ratio=${mask_ratio:-0}
+warmup_iterations=${warmup_iterations:-500}
+profiling_iterations=${profiling_iterations:-2000}
 
 optional_args=""
 if [[ -n "$operation" ]]; then
@@ -39,7 +43,7 @@ fi
 
 ${root_dir}/$profiler_app \
   --kernels=${kernel} --m=16384 --n=16384 --k=16384 --providers=cutlass \
-  --sleep-duration=3000 --warmup-iterations=500 --profiling-iterations=2000 \
+  --sleep-duration=3000 --warmup-iterations=${warmup_iterations} --profiling-iterations=${profiling_iterations} \
   --print-kernel-before-running=true --verification-enabled=false \
   --dist=uniform,min:-${scope},max:${scope} --mask_ratio=${mask_ratio} \
   --output="${output_path}.csv" ${optional_args} 2>&1 | tee -a "${output_path}.log.txt"

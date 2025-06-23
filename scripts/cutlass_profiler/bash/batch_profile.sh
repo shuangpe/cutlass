@@ -59,6 +59,11 @@ check_all_configs() {
   log_info "  ${#freq[@]} Frequencies: ${freq[*]}"
   log_info "  ${#scope[@]} InitScopes: ${scope[*]}"
   log_info "  ${#mask_ratios[@]} MaskRatios: ${mask_ratios[*]}"
+  log_info "  ${#profile_iterations[@]} ProfileIterations:"
+  # Print each profile iteration line by line
+  for ((i=0; i<${#profile_iterations[@]}; i++)); do
+    log_info "    [$i]: ${profile_iterations[$i]}"
+  done
   log_info "  ${#kernel_array[@]} Kernels:"
   # Print each kernel line by line
   for ((i=0; i<${#kernel_array[@]}; i++)); do
@@ -66,7 +71,7 @@ check_all_configs() {
   done
 
   # Calculate total number of runs
-  total_runs=$((${#mode[@]} * ${#freq[@]} * ${#kernel_array[@]} * ${#scope[@]} * ${#mask_ratios[@]}))
+  total_runs=$((${#mode[@]} * ${#freq[@]} * ${#kernel_array[@]} * ${#scope[@]} * ${#mask_ratios[@]} * ${#profile_iterations[@]}))
   log_info "Total runs: $total_runs"
 }
 
@@ -136,7 +141,9 @@ profile_kernel() {
   local freq="$5"
   local current_run="$6"
   local total_runs="$7"
-  local profile_type="$8"  # New parameter
+  local profile_type="$8"
+  local warmup_iterations="$9"
+  local profiling_iterations="${10}"
 
   # Record the start time of the task
   local task_start_time=$(date +%s)
@@ -166,13 +173,13 @@ profile_kernel() {
     echo -ne "\r"
   fi
 
-  local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}
-  local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio}"
-  log_info "./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output}"
+  local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_wi${warmup_iterations}_pi${profiling_iterations}
+  local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
+  log_info "./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
   if [ "$DRY_RUN" = "false" ]; then
     nvsmi_log start
-    ./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output}
+    ./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
     nvsmi_log stop
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
@@ -230,8 +237,11 @@ apply_frequency_and_run() {
       IFS=',' read -r kernel_name operation <<< "$kernel_tuple"
       for scope in $init_scope; do
         for mask_ratio in "${mask_ratios[@]}"; do
-          current_run=$((current_run + 1))
-          profile_kernel "$kernel_name" "$operation" "$mask_ratio" "$scope" "$freq_value" "$current_run" "$total_runs" "$profile_type"
+          for iteration_tuple in "${profile_iterations[@]}"; do
+            IFS=',' read -r warmup_iterations profiling_iterations <<< "$iteration_tuple"
+            current_run=$((current_run + 1))
+            profile_kernel "$kernel_name" "$operation" "$mask_ratio" "$scope" "$freq_value" "$current_run" "$total_runs" "$profile_type" "$warmup_iterations" "$profiling_iterations"
+          done
         done
       done
     done
