@@ -7510,7 +7510,7 @@ def GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
       continue
     tile_descriptions = []
     for cluster_shape in cluster_shapes_2sm:
-      if cluster_shape in [[2,2,1], [2,4,1], [4,2,1]]:
+      if cluster_shape not in [[4,2,1]]:
         continue
       multiplier_2sm = (1, 1, 1) if cluster_shape == DynamicClusterShape else (cluster_shape[0] // 2, cluster_shape[1], cluster_shape[2])
       tile_descriptions.append(
@@ -10988,7 +10988,7 @@ def GenerateSM100(manifest, cuda_version):
   # if not bool(set(manifest.compute_capabilities_feature_set).intersection(arch_family_cc)):
   #   GenerateSM100_TensorOp_int8_UMMA_gemm(manifest, cuda_version)
 
-  # GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version)
+  GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version)
   # # grouped GEMM
   # GenerateSM100_TensorOp_fp8_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
   # GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmKind.GroupedUniversal3x)
