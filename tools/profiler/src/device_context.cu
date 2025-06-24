@@ -210,6 +210,8 @@ DeviceAllocation *DeviceContext::allocate_and_initialize_tensor(
       }
     }
 
+    data_distribution.int_scale = -1;
+
     initialize_allocation_with_data_distribution(
       options, seed_shift, allocation, data_distribution
     );

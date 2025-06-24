@@ -815,7 +815,7 @@ void BlockFillRandomUniform(
 
   using RandomFunc = detail::RandomUniformFunc<Element>;
 
-  typename RandomFunc::Params params(seed, max, min, bits, pnan);
+  typename RandomFunc::Params params(seed, max, min, bits, pnan, 1);
 
   BlockForEach<Element, RandomFunc>(ptr, capacity, params, /*grid_size*/0, /*block_size*/0, stream);
 }
