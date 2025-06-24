@@ -7,6 +7,7 @@ LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 CONFIG_FILE="batch_profile.cfg"
 OUTPUT_DIR=""
 BENCHNAME="Automation Workload"
+PROFILER_SCRIPT="./cutlass_profiler_16k.sh"  # Default profiler script path
 current_run=0  # Now a global variable
 
 #===== Helper Functions =====
@@ -175,11 +176,11 @@ profile_kernel() {
 
   local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_wi${warmup_iterations}_pi${profiling_iterations}
   local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
-  log_info "./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
+  log_info "${PROFILER_SCRIPT} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
   if [ "$DRY_RUN" = "false" ]; then
     nvsmi_log start
-    ./cutlass_profiler_16k.sh --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
+    ${PROFILER_SCRIPT} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
     nvsmi_log stop
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
@@ -257,6 +258,16 @@ main() {
       DRY_RUN="true"
       log_info "Running in DRY RUN mode - commands will be shown but not executed"
       shift
+    elif [ "$arg" = "-f" ]; then
+      shift
+      if [ -n "$1" ]; then
+        PROFILER_SCRIPT="$1"
+        log_info "Using custom profiler script: $PROFILER_SCRIPT"
+        shift
+      else
+        log_error "Option -f requires an argument"
+        exit 1
+      fi
     fi
   done
 
