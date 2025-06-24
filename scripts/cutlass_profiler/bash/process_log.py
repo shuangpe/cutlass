@@ -5,6 +5,7 @@ import sys
 import re
 import csv
 import subprocess
+import argparse
 from pathlib import Path
 
 # ====================== HELPER FUNCTIONS ======================
@@ -22,7 +23,7 @@ def _safe_convert_for_sort(value):
     # Special case for 'oob' frequency
     if value == 'oob':
         return float('inf')  # Make 'oob' sort last
-    
+
     # Try numeric conversion
     try:
         return float(value)
@@ -32,12 +33,13 @@ def _safe_convert_for_sort(value):
 
 # ====================== FILE DISCOVERY FUNCTIONS ======================
 
-def find_log_pairs(directory_path):
+def find_log_pairs(directory_path, filters=None):
     """
     Traverse the directory to find all _nvsmi.txt files and their corresponding *gemm*.csv files.
 
     Args:
         directory_path (str): Log files directory path
+        filters (list, optional): List of filter keywords
 
     Returns:
         list: List of tuples (nvsmi_file_path, gemm_file_path)
@@ -51,6 +53,10 @@ def find_log_pairs(directory_path):
     # Filter nvsmi files and perf files
     nvsmi_files = [f for f in all_files if f.endswith("_nvsmi.txt")]
     perf_files = [f for f in all_files if "gemm" in f and f.endswith(".csv")]
+
+    # Apply filters if specified
+    if filters:
+        nvsmi_files = [f for f in nvsmi_files if any(keyword in f for keyword in filters)]
 
     result_pairs = []
 
@@ -266,7 +272,7 @@ def reorder_and_enhance_data(headers, data_rows):
             _safe_convert_for_sort(row[idx]) for idx in sort_indices
         ])
         return new_headers, new_data_rows_sorted
-    
+
     return new_headers, new_data_rows
 
 def process_with_pandas(input_csv, data_type, directory_path, headers=None, combined_records=None):
@@ -393,14 +399,16 @@ def save_csv(output_file, headers, data_rows):
 
 def main():
     """Main function for processing log files."""
-    if len(sys.argv) < 2:
-        print("Usage: ./process_log.py <directory_path>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Process log files.")
+    parser.add_argument("directory_path", help="Log files directory path")
+    parser.add_argument("--filter", help="Filter keywords separated by semicolons (e.g., 'keyword1;keyword2')", default=None)
+    args = parser.parse_args()
 
-    directory_path = sys.argv[1]
+    directory_path = args.directory_path
+    filters = args.filter.split(';') if args.filter else None
 
     try:
-        log_pairs = find_log_pairs(directory_path)
+        log_pairs = find_log_pairs(directory_path, filters)
     except FileNotFoundError as e:
         print(f"Error: {e}")
         sys.exit(1)
