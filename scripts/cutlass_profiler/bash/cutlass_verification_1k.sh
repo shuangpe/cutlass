@@ -42,8 +42,8 @@ else
 fi
 
 ${root_dir}/$profiler_app \
-  --kernels=${kernel} --m=16384 --n=16384 --k=16384 --providers=cutlass \
+  --kernels=${kernel} --m=1024 --n=1024 --k=1024 --providers=cutlass \
   --sleep-duration=3000 --warmup-iterations=${warmup_iterations} --profiling-iterations=${profiling_iterations} \
-  --print-kernel-before-running=true --verification-enabled=false \
+  --print-kernel-before-running=true --verification-enabled=true --save-workspace=always \
   --dist=uniform,min:-${scope},max:${scope} --mask_ratio=${mask_ratio} \
   --output="${output_path}.csv" ${optional_args} 2>&1 | tee -a "${output_path}.log.txt"
