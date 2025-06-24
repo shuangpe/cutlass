@@ -134,7 +134,7 @@ def write_to_csv(data, output_file):
         for entry in data:
             writer.writerow(entry)
 
-def calculate_stable_mean(values, stability_window=5, stability_threshold=0.05):
+def calculate_stable_mean(values, stability_window=1, stability_threshold=0.05):
     """
     Calculate the mean value during the stable period of the metric.
 

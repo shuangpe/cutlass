@@ -208,7 +208,7 @@ def reorder_and_enhance_data(headers, data_rows):
     # Define new column order
     new_order = [
         "Freq", "Kernel", "Hacking", "MaskRatio", "TFLOPs", "TFLOPsPerWatt",
-        "ScopeMin", "ScopeMax", "GPUAvgPowerMeanstable(W)", "MemAvgPowerMeanstable(W)",
+        "ScopeMin", "ScopeMax", "WarmupIter", "ProfileIter", "GPUAvgPowerMeanstable(W)", "MemAvgPowerMeanstable(W)",
         "GPUInstPowerMeanstable(W)", "GPUTempMeanstable(C)", "MemTempMeanstable(C)",
         "SMClocksMeanstable(MHz)", "MemClocksMeanstable(MHz)", "GPUUtilMeanstable(%)",
         "MemUtilMeanstable(%)"
