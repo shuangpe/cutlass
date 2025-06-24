@@ -794,6 +794,26 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
 
   std::vector<uint8_t> host_data(bytes());
 
+  auto count_diff = [&](auto prefix, auto data, int rows, int cols, int row_tile, int col_tile) {
+    using Element = typename std::remove_pointer_t<decltype(data)>;
+    int diff_count = 0;
+    for (int r = 0; r < rows; r += row_tile) {
+      for (int c = 0; c < cols; c += col_tile) {
+        // Copy the first tile to the next tile
+        for (int tr = 0; tr < row_tile && (r + tr) < rows; ++tr) {
+          for (int tc = 0; tc < col_tile && (c + tc) < cols; ++tc) {
+            int idx_dst = (r + tr) * cols + (c + tc);
+            int idx_src = tr * cols + tc;
+            if (ReferenceFactory<Element>::get(data, idx_dst) != ReferenceFactory<Element>::get(data, idx_src)) {
+              ++diff_count;
+            }
+          }
+        }
+      }
+    }
+    std::cout << prefix << ": " << diff_count << " out of " << (rows * cols) << " (" << (diff_count * 100.0 / (rows * cols)) << "%) elements are different." << std::endl;
+  };
+
   auto random_zeros = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
     if (mask_ratio == 0) {
       std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio << ")" << std::endl;
@@ -810,10 +830,12 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
     std::mt19937 g(rd());
     std::shuffle(indices.begin(), indices.end(), g);
 
+    using Element = typename std::remove_pointer_t<decltype(data)>;
+
     for (size_t i = 0; i < num_zeros; ++i) {
       int r = indices[i] / col_tile;
       int c = indices[i] % col_tile;
-      data[r * cols + c] = static_cast<typename std::remove_pointer_t<decltype(data)>>(0.0);
+      ReferenceFactory<Element>::get(data, r * cols + c) = static_cast<Element>(0.0);
     }
 
     std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio << " num_zeros=" << num_zeros << ")" << std::endl;
@@ -823,14 +845,33 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
     // Fill the first tile with random zeros
     random_zeros(data, rows, cols, row_tile, col_tile);
 
+    using Element = typename std::remove_pointer_t<decltype(data)>;
+
+    count_diff("Before copy tiles", data, rows, cols, row_tile, col_tile);
+
     // Fill the rest of the matrix by copying from the tile
     for (int r = 0; r < rows; ++r) {
       for (int c = 0; c < cols; ++c) {
         if (r < row_tile && c < col_tile) continue;
-        data[r * cols + c] = data[(r%row_tile) * cols + (c%col_tile)];
+        int idx_dst = r * cols + c;
+        int idx_src = (r % row_tile) * cols + (c % col_tile);
+        ReferenceFactory<Element>::get(data, idx_dst) = ReferenceFactory<Element>::get(data, idx_src);
       }
     }
+
+    uint32_t zero_count = 0;
+    uint32_t total_count = rows * cols;
+
+    for (uint32_t i =0; i < total_count; ++i) {
+      if (ReferenceFactory<Element>::get(data, i) == Element(0.0)) {
+        ++zero_count;
+      }
+    }
+
+    count_diff("After copy tiles", data, rows, cols, row_tile, col_tile);
+
     std::cout << "Copy tiles in matrix (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << ")" << std::endl;
+    std::cout << "Zero count in matrix " << name_ << ": " << zero_count << " out of " << total_count << " (" << (zero_count * 100.0 / total_count) << "%)" << std::endl;
   };
 
   switch (type_) {

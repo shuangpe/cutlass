@@ -1117,7 +1117,7 @@ void BlockFillRandomUniform(
                                           ///  are not truncated to zero. Permits reducing precision of
                                           ///  data.
   double pnan = 0) {                      ///< Percentage of NaN elements.
-  detail::RandomUniformFunc<Element> random_func(seed, max, min, bits, pnan);
+  detail::RandomUniformFunc<Element> random_func(seed, max, min, bits, pnan, true);
 
   for (size_t i = 0; i < capacity; ++i) {
     ReferenceFactory<Element>::get(ptr, i) = random_func();
