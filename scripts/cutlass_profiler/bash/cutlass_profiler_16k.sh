@@ -46,4 +46,5 @@ ${root_dir}/$profiler_app \
   --sleep-duration=3000 --warmup-iterations=${warmup_iterations} --profiling-iterations=${profiling_iterations} \
   --print-kernel-before-running=true --verification-enabled=false \
   --dist=uniform,min:-${scope},max:${scope} --mask_ratio=${mask_ratio} \
+  # --save-workspace=always \
   --output="${output_path}.csv" ${optional_args} 2>&1 | tee -a "${output_path}.log.txt"

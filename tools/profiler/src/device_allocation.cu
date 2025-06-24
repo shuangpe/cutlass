@@ -33,6 +33,8 @@
 */
 
 #include <cstring>
+#include <fstream>
+#include <sstream>
 
 #include "cutlass/numeric_types.h"
 #include "cutlass/layout/matrix.h"
@@ -814,6 +816,35 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
     std::cout << prefix << ": " << diff_count << " out of " << (rows * cols) << " (" << (diff_count * 100.0 / (rows * cols)) << "%) elements are different." << std::endl;
   };
 
+  auto dump_file = [&](auto filename, auto data, int rows, int cols, int row_tile, int col_tile) {
+    using Element = typename std::remove_pointer_t<decltype(data)>;
+
+    if (rows* cols <= 1024*2048) {
+      auto file_full = filename + "_full.txt";
+      std::ofstream out_full(file_full);
+      for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+          auto val = static_cast<float>(ReferenceFactory<Element>::get(data, r * cols + c));
+          out_full << val << ", ";
+        }
+        out_full << std::endl;
+      }
+      out_full.close();
+    }
+
+    auto file_tile = filename + "_tile.txt";
+    std::ofstream out_tile(file_tile);
+
+    for (int r = 0; r < row_tile; ++r) {
+      for (int c = 0; c < col_tile; ++c) {
+        auto val = static_cast<float>(ReferenceFactory<Element>::get(data, r * cols + c));
+        out_tile << val << ", ";
+      }
+      out_tile << std::endl;
+    }
+    out_tile.close();
+  };
+
   auto random_zeros = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
     if (mask_ratio == 0) {
       std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio << ")" << std::endl;
@@ -869,6 +900,10 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
     }
 
     count_diff("After copy tiles", data, rows, cols, row_tile, col_tile);
+
+    std::stringstream ss;
+    ss << name_ << "_range" << dist.uniform.max << "_mask" << mask_ratio;
+    dump_file(ss.str(), data, rows, cols, row_tile, col_tile);
 
     std::cout << "Copy tiles in matrix (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << ")" << std::endl;
     std::cout << "Zero count in matrix " << name_ << ": " << zero_count << " out of " << total_count << " (" << (zero_count * 100.0 / total_count) << "%)" << std::endl;
