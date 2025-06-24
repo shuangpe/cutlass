@@ -820,7 +820,7 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
     using Element = typename std::remove_pointer_t<decltype(data)>;
 
     if (rows* cols <= 1024*2048) {
-      auto file_full = filename + "_full.txt";
+      auto file_full = filename + "_full.mat";
       std::ofstream out_full(file_full);
       for (int r = 0; r < rows; ++r) {
         for (int c = 0; c < cols; ++c) {
@@ -830,9 +830,10 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
         out_full << std::endl;
       }
       out_full.close();
+      std::cout << "Wrote full matrix to file: " << file_full << std::endl;
     }
 
-    auto file_tile = filename + "_tile.txt";
+    auto file_tile = filename + "_tile.mat";
     std::ofstream out_tile(file_tile);
 
     for (int r = 0; r < row_tile; ++r) {
@@ -843,11 +844,13 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
       out_tile << std::endl;
     }
     out_tile.close();
+
+    std::cout << "Wrote matrix tile to file: " << file_tile << std::endl;
   };
 
   auto load_file = [&](auto filename, auto data, int rows, int cols, int row_tile, int col_tile) {
     using Element = typename std::remove_pointer_t<decltype(data)>;
-    auto file_tile = filename + "_tile.txt";
+    auto file_tile = filename + "_tile.mat";
     std::ifstream in_tile(file_tile);
     if (!in_tile.is_open()) {
       return -1;
@@ -894,6 +897,8 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
       }
     }
 
+    std::cout << "Loaded tile from file: " << file_tile << std::endl;
+
     return 0;
   };
 
@@ -926,16 +931,14 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
 
   auto copy_tiles = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
     std::stringstream ss;
-    ss << name_ << "_" << row_tile << "x" << col_tile << "_range" << dist.uniform.max << "_mask" << mask_ratio;
+    ss << row_tile << "x" << col_tile << "_range" << dist.uniform.max << "_mask" << mask_ratio << "_" << name_;
     std::string file_prefix = ss.str();
 
     auto retcode = load_file(file_prefix, data, rows, cols, row_tile, col_tile);
-    if (retcode == 0) {
-      std::cout << "Loaded tile from file: " << file_prefix << std::endl;
-    } else if (retcode < 0) {
+    if (retcode < 0) {
       std::cerr << "Failed to load tile from file: " << file_prefix << " with error code: " << retcode << std::endl;
-    // Fill the first tile with random zeros
-    random_zeros(data, rows, cols, row_tile, col_tile);
+      // Fill the first tile with random zeros
+      random_zeros(data, rows, cols, row_tile, col_tile);
     }
 
     using Element = typename std::remove_pointer_t<decltype(data)>;

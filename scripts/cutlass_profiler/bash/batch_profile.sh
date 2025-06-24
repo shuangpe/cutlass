@@ -85,6 +85,7 @@ create_output_directory() {
     OUTPUT_DIR="${date_prefix}_cutlass_profile_${dir_num}"
     if [ ! -d "$OUTPUT_DIR" ]; then
       mkdir -p "$OUTPUT_DIR"
+      mkdir -p "$OUTPUT_DIR/data"
       log_info "Created output directory: $OUTPUT_DIR"
       return
     fi
@@ -210,6 +211,8 @@ profile_kernel() {
 # Apply frequency and run kernel analysis
 apply_frequency_and_run() {
   local freq_value="$1"
+  local kernel_name="$2"
+  local operation="$3"
 
   local freq_cmd_value=$frequency_cmd
 
@@ -234,15 +237,12 @@ apply_frequency_and_run() {
   # Outer loop - iterate over modes
   for profile_type in "${mode[@]}"; do
     # For each kernel, execute with different mask_ratio and scope combinations
-    for kernel_tuple in "${kernel_array[@]}"; do
-      IFS=',' read -r kernel_name operation <<< "$kernel_tuple"
-      for scope in $init_scope; do
-        for mask_ratio in "${mask_ratios[@]}"; do
-          for iteration_tuple in "${profile_iterations[@]}"; do
-            IFS=',' read -r warmup_iterations profiling_iterations <<< "$iteration_tuple"
-            current_run=$((current_run + 1))
-            profile_kernel "$kernel_name" "$operation" "$mask_ratio" "$scope" "$freq_value" "$current_run" "$total_runs" "$profile_type" "$warmup_iterations" "$profiling_iterations"
-          done
+    for scope in $init_scope; do
+      for mask_ratio in "${mask_ratios[@]}"; do
+        for iteration_tuple in "${profile_iterations[@]}"; do
+          IFS=',' read -r warmup_iterations profiling_iterations <<< "$iteration_tuple"
+          current_run=$((current_run + 1))
+          profile_kernel "$kernel_name" "$operation" "$mask_ratio" "$scope" "$freq_value" "$current_run" "$total_runs" "$profile_type" "$warmup_iterations" "$profiling_iterations"
         done
       done
     done
@@ -303,9 +303,21 @@ main() {
   local start_time=$(date +%s)
   total_execution_time=0
 
-  for freq_value in "${freq[@]}"; do
-    apply_frequency_and_run "$freq_value"
-    log_info "Completed frequency $freq_value runs: current progress $current_run/$total_runs"
+  for kernel_tuple in "${kernel_array[@]}"; do
+    IFS=',' read -r kernel_name operation <<< "$kernel_tuple"
+    for freq_value in "${freq[@]}"; do
+      apply_frequency_and_run "$freq_value" "$kernel_name" "$operation"
+      log_info "Completed kernel $kernel_name frequency $freq_value runs: current progress $current_run/$total_runs"
+    done
+    for file in ./*.mat; do
+      [ -e "$file" ] || continue  # Skip if no .mat files exist
+      local base_name=$(basename "$file")
+      if [[ "$base_name" != *"${kernel_name}"* ]]; then
+        mv "$file" "$OUTPUT_DIR/data/${kernel_name}_$base_name"
+      else
+        mv "$file" "$OUTPUT_DIR/data/$base_name"
+      fi
+    done
   done
 
   local end_time=$(date +%s)
