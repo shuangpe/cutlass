@@ -845,6 +845,58 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
     out_tile.close();
   };
 
+  auto load_file = [&](auto filename, auto data, int rows, int cols, int row_tile, int col_tile) {
+    using Element = typename std::remove_pointer_t<decltype(data)>;
+    auto file_tile = filename + "_tile.txt";
+    std::ifstream in_tile(file_tile);
+    if (!in_tile.is_open()) {
+      return -1;
+    }
+
+    int r = 0;
+    std::string line;
+    std::vector<float> values;
+    values.reserve(row_tile * col_tile);
+
+    while (std::getline(in_tile, line)) {
+      std::istringstream iss(line);
+      std::string token;
+      int c = 0;
+      while (std::getline(iss, token, ',')) {
+        token.erase(0, token.find_first_not_of(" \t"));
+        token.erase(token.find_last_not_of(" \t") + 1);
+
+        if (!token.empty()) {
+          float value = std::stof(token);
+          values.push_back(value);
+          c++;
+        }
+      }
+      if (c != 0) {
+        if (c == col_tile) {
+          r++;
+        } else {
+          return -2;
+        }
+      }
+    }
+    in_tile.close();
+
+    if (r != row_tile) {
+      return -3;
+    }
+
+    for (int r = 0; r < row_tile; ++r) {
+      for (int c = 0; c < col_tile; ++c) {
+        int idx_dst = r * cols + c;
+        int idx_src = r * col_tile + c;
+        ReferenceFactory<Element>::get(data, idx_dst) = static_cast<Element>(values[idx_src]);
+      }
+    }
+
+    return 0;
+  };
+
   auto random_zeros = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
     if (mask_ratio == 0) {
       std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio << ")" << std::endl;
@@ -873,8 +925,18 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
   };
 
   auto copy_tiles = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
+    std::stringstream ss;
+    ss << name_ << "_" << row_tile << "x" << col_tile << "_range" << dist.uniform.max << "_mask" << mask_ratio;
+    std::string file_prefix = ss.str();
+
+    auto retcode = load_file(file_prefix, data, rows, cols, row_tile, col_tile);
+    if (retcode == 0) {
+      std::cout << "Loaded tile from file: " << file_prefix << std::endl;
+    } else if (retcode < 0) {
+      std::cerr << "Failed to load tile from file: " << file_prefix << " with error code: " << retcode << std::endl;
     // Fill the first tile with random zeros
     random_zeros(data, rows, cols, row_tile, col_tile);
+    }
 
     using Element = typename std::remove_pointer_t<decltype(data)>;
 
@@ -901,9 +963,9 @@ void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int m
 
     count_diff("After copy tiles", data, rows, cols, row_tile, col_tile);
 
-    std::stringstream ss;
-    ss << name_ << "_range" << dist.uniform.max << "_mask" << mask_ratio;
-    dump_file(ss.str(), data, rows, cols, row_tile, col_tile);
+    if (retcode == -1) {
+      dump_file(file_prefix, data, rows, cols, row_tile, col_tile);
+    }
 
     std::cout << "Copy tiles in matrix (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << ")" << std::endl;
     std::cout << "Zero count in matrix " << name_ << ": " << zero_count << " out of " << total_count << " (" << (zero_count * 100.0 / total_count) << "%)" << std::endl;
