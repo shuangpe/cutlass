@@ -1118,7 +1118,7 @@ void BlockFillRandomUniform(
                                           ///  data.
   int exclude_zero = 0,
   double pnan = 0) {                      ///< Percentage of NaN elements.
-  detail::RandomUniformFunc<Element> random_func(seed, max, min, bits, pnan, exclude_zero);
+  detail::RandomUniformFunc<Element> random_func(seed, max, min, bits, pnan, exclude_zero>=0);
 
   for (size_t i = 0; i < capacity; ++i) {
     ReferenceFactory<Element>::get(ptr, i) = random_func();

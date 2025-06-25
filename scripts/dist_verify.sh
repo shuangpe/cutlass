@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+script_dir=$(dirname "$0")
+output_file="profile_nvfp4_dist_verify_oob"
+
 scope_array=(0.5 2 5 6)
 int_scale_array=(-1 0 1)
 exclude_zero_array=(-1 0 1)
@@ -66,8 +69,12 @@ for scope in "${scope_array[@]}"; do
                     --profiling-iterations=2000 \
                     --tags=$tags \
                     --initialization-provider=$init_provider \
+                    --save-workspace=always \
                     --dist=uniform,min:-$scope,max:$scope,scale:$int_scale,exclude_zero:$exclude_zero \
-                    --append=true --output=cutlass_profile_nvfp4_dist_verify_oobMhz.csv
+                    --append=true --output=${output_file}.csv
+
+                python3 "$script_dir/count_nvfp4_csv.py" --csv ${output_file}_ab_dist --tags "$tags"
+                rm -rf *.mat
                 sleep 5
             done
         done
