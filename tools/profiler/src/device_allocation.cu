@@ -780,7 +780,7 @@ void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
   }
 }
 
-void DeviceAllocation::initialize_random_host(int seed, Distribution dist) {
+void DeviceAllocation::initialize_random_host(int seed, Distribution dist, int mask_ratio) {
   if (!bytes()) {
 #ifndef NDEBUG
     std::cout << "Skipping initialization of size 0 allocation\n";

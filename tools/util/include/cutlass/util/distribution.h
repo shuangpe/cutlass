@@ -78,19 +78,21 @@ struct Distribution {
   /// Random values are cast to integer after scaling by this power of two
   int int_scale;
 
+  /// Whether to exclude zero values from the distribution
+  int exclude_zero;
+
   //
   // Methods
   //
 
-  Distribution() : kind(Invalid), int_scale(0) {}
-
-/// Configures distribution as uniform random
-  Distribution &set_uniform(double _min, double _max, int _int_scale = 0, double _pnan = 0) {
+  Distribution() : kind(Invalid), int_scale(0), exclude_zero(0) {}  /// Configures distribution as uniform random
+  Distribution &set_uniform(double _min, double _max, int _int_scale = 0, double _pnan = 0, int _exclude_zero = 0) {
     kind = Uniform;
     uniform.min = _min;
     uniform.max = _max;
     int_scale = _int_scale;
     uniform.pnan = _pnan;
+    exclude_zero = _exclude_zero;
     return *this;
   }
 

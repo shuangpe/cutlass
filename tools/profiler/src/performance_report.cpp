@@ -324,7 +324,8 @@ std::ostream & PerformanceReport::print_result_pretty_(
     out
       << "         Runtime: " << result.runtime << "  ms\n"
       << "          Memory: " << result.gbytes_per_sec() << " GiB/s\n"
-      << "\n            Math: " << result.gflops_per_sec() << " GFLOP/s\n";
+      << "\n            Math: " << result.gflops_per_sec() << " GFLOP/s\n"
+      << "            Math: " << result.gflops_per_sec()/1000.0 << " TFLOP/s\n";
 
   }
 
@@ -365,6 +366,7 @@ std::ostream & PerformanceReport::print_csv_header_(
   out
     << ",GB/s"
     << ",GFLOPs"
+    << ",TFLOPs"
     ;
 
   return out;
@@ -416,11 +418,12 @@ std::ostream & PerformanceReport::print_result_csv_(
     out
       << "," << result.gbytes_per_sec()
       << "," << result.gflops_per_sec()
+      << "," << result.gflops_per_sec() / 1000.0
       ;
 
   }
   else {
-    out << std::string(2
+    out << std::string(3
       , ','
     );
   }

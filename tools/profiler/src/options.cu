@@ -277,6 +277,7 @@ Options::Initialization::Initialization(cutlass::CommandLine const &cmdline) {
   }
 
   cmdline.get_cmd_line_argument("seed", seed, 2019);
+  cmdline.get_cmd_line_argument("mask_ratio", mask_ratio, 0);
 
   if (cmdline.check_cmd_line_flag("dist")) {
     // user has set the data distribution (fix data distribution once set)
@@ -370,6 +371,14 @@ void Options::Initialization::get_distribution(
       std::stringstream ss;
       ss << it->second;
       ss >> dist.int_scale;
+      continue;  // next token
+    }
+
+    // Exclude zero value in distribution - if 1, zero values are excluded
+    if ((it->first.compare("exclude_zero") == 0) && !it->second.empty()) {
+      std::stringstream ss;
+      ss << it->second;
+      ss >> dist.exclude_zero;
       continue;  // next token
     }
 
