@@ -1116,8 +1116,9 @@ void BlockFillRandomUniform(
   int bits = -1,                          ///< If non-negative, specifies number of fractional bits that 
                                           ///  are not truncated to zero. Permits reducing precision of
                                           ///  data.
+  int exclude_zero = 0,
   double pnan = 0) {                      ///< Percentage of NaN elements.
-  detail::RandomUniformFunc<Element> random_func(seed, max, min, bits, pnan, true);
+  detail::RandomUniformFunc<Element> random_func(seed, max, min, bits, pnan, exclude_zero);
 
   for (size_t i = 0; i < capacity; ++i) {
     ReferenceFactory<Element>::get(ptr, i) = random_func();
@@ -1505,6 +1506,7 @@ void BlockFillRandom(
       dist.uniform.max,
       dist.uniform.min, 
       dist.int_scale,
+      dist.exclude_zero,
       dist.uniform.pnan);
   }
 }

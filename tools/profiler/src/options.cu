@@ -374,6 +374,14 @@ void Options::Initialization::get_distribution(
       continue;  // next token
     }
 
+    // Exclude zero value in distribution - if 1, zero values are excluded
+    if ((it->first.compare("exclude_zero") == 0) && !it->second.empty()) {
+      std::stringstream ss;
+      ss << it->second;
+      ss >> dist.exclude_zero;
+      continue;  // next token
+    }
+
     // Casts as integer without scaling
     if (it->first.compare("integer") == 0) {
       dist.int_scale = 0;
