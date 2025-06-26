@@ -104,10 +104,10 @@ create_output_directory() {
   fi
 
   while true; do
-    OUTPUT_DIR="${date_prefix}_cutlass_profile_${dir_num}${dir_suffix}"
+    OUTPUT_DIR="${date_prefix}_cutlass_profile_${dir_num}"
     if [ ! -d "$OUTPUT_DIR" ]; then
-      mkdir -p "$OUTPUT_DIR"
-      mkdir -p "$OUTPUT_DIR/data"
+      OUTPUT_DIR="${OUTPUT_DIR}${dir_suffix}"
+      mkdir -p "$OUTPUT_DIR" "$OUTPUT_DIR/data"
       log_info "Created output directory: $OUTPUT_DIR"
       return
     fi
@@ -197,14 +197,15 @@ profile_kernel() {
     echo -ne "\r"
   fi
 
-  local dist_output=${OUTPUT_DIR}/data/${kernel_name}_mask${mask_ratio}_scope${scope}.data_dist
+  local dist_output=${OUTPUT_DIR}/data/${kernel_name}_mask${mask_ratio}_scope${scope}
   local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_run${current_run}
   local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
   log_info "${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
   dump_data=false
-  if [ ! -f "${dist_output}.csv" ]; then
+  if [ ! -f "${dist_output}.data_dist.csv" ]; then
     dump_data=true
+    rm -rf *.mat
   fi
 
   if [ "$DRY_RUN" = "false" ]; then
@@ -213,7 +214,16 @@ profile_kernel() {
       --dump_data ${dump_data} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
     nvsmi_log stop
     if [ $dump_data = true ]; then
-      ./analyze_distribution.py --tags ${tags} --csv ${dist_output}
+      log_info "Analyzing data distribution and moving *.mat files..."
+      ./analyze_distribution.py --tags ${tags} --csv ${dist_output}.data_dist
+      for file in ./*_A.mat; do
+        [ -e "$file" ] || continue
+        mv "$file" "${dist_output}_A.mat"
+      done
+      for file in ./*_B.mat; do
+        [ -e "$file" ] || continue
+        mv "$file" "${dist_output}_B.mat"
+      done
     fi
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
@@ -371,15 +381,6 @@ main() {
     for freq_value in "${freq[@]}"; do
       apply_frequency_and_run "$freq_value" "$kernel_name" "$operation"
       log_info "Completed kernel $kernel_name frequency $freq_value runs: current progress $current_run/$total_runs"
-    done
-    for file in ./*.mat; do
-      [ -e "$file" ] || continue  # Skip if no .mat files exist
-      local base_name=$(basename "$file")
-      if [[ "$base_name" != *"${kernel_name}"* ]]; then
-        mv "$file" "$OUTPUT_DIR/data/${kernel_name}_$base_name"
-      else
-        mv "$file" "$OUTPUT_DIR/data/$base_name"
-      fi
     done
   done
 
