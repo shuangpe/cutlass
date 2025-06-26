@@ -1,8 +1,8 @@
 #!/bin/bash
 
-root_dir="/dataset/shuangpeng/project/cutlass/cutlass/build/"
+root_dir="/dataset/shuangpeng/project/cutlass/cutlass/build/hacking"
+profiler_app="tools/profiler/cutlass_profiler"
 
-# 解析参数
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     --mode|-m) mode="$2"; shift ;;
@@ -14,6 +14,7 @@ while [[ "$#" -gt 0 ]]; do
     --tags|-t) tags="$2"; shift ;;
     --warmup-iterations|-wi) warmup_iterations="$2"; shift ;;
     --profiling-iterations|-pi) profiling_iterations="$2"; shift ;;
+    --dump_data) dump_data="$2"; shift ;;
     *) echo "Unknown parameter passed: $1"; exit 1 ;;
   esac
   shift
@@ -26,6 +27,7 @@ output_path=${output_path:-output}
 mask_ratio=${mask_ratio:-0}
 warmup_iterations=${warmup_iterations:-500}
 profiling_iterations=${profiling_iterations:-2000}
+dump_data=${dump_data:-false}
 
 optional_args=""
 if [[ -n "$operation" ]]; then
@@ -34,16 +36,12 @@ fi
 if [[ -n "$tags" ]]; then
   optional_args="${optional_args} --tags=$tags"
 fi
-
-if [[ "$mode" -eq 0 ]]; then
-  profiler_app="before_hacking/tools/profiler/cutlass_profiler"
-else
-  profiler_app="after_hacking/tools/profiler/cutlass_profiler"
+if [[ "$dump_data" == "true" ]]; then
+  optional_args="${optional_args} --save-workspace=always"
 fi
 
 ${root_dir}/$profiler_app \
   --kernels=${kernel} --m=16384 --n=16384 --k=16384 --providers=cutlass \
   --sleep-duration=3000 --warmup-iterations=${warmup_iterations} --profiling-iterations=${profiling_iterations} \
-  --print-kernel-before-running=true --verification-enabled=false \
-  --dist=uniform,min:-${scope},max:${scope} --mask_ratio=${mask_ratio} \
-  --output="${output_path}.csv" ${optional_args} 2>&1 | tee -a "${output_path}.log.txt"
+  --print-kernel-before-running=true --verification-enabled=false --initialization-provider=device \
+  --dist=uniform,min:-${scope},max:${scope},scale:-1,exclude_zero:1,mask_ratio:${mask_ratio} --output="${output_path}.csv" ${optional_args} 2>&1 | tee -a "${output_path}.log.txt"
