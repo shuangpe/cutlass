@@ -54,6 +54,33 @@
 namespace cutlass::gemm::collective {
 using namespace cute;
 
+#if !defined(SM100_DEBUG_MODE)
+#define SM100_DEBUG_MODE 100
+#endif
+
+#if SM100_DEBUG_MODE == 1 || SM100_DEBUG_MODE == 2
+#if !defined(DEBUG_BLOCK_ID)
+#define DEBUG_BLOCK_ID 0
+#endif
+#endif
+
+#if SM100_DEBUG_MODE == 1
+#define TRACE_LOAD(...) \
+  if (cute::thread(64, DEBUG_BLOCK_ID)) { \
+    __VA_ARGS__; \
+  }
+#define TRACE_MMA(...) do {} while(0)
+#elif SM100_DEBUG_MODE == 2
+#define TRACE_MMA(...) \
+  if (cute::thread(0, DEBUG_BLOCK_ID)) { \
+    __VA_ARGS__; \
+  }
+#define TRACE_LOAD(...) do {} while(0)
+#else
+#define TRACE_LOAD(...) do {} while(0)
+#define TRACE_MMA(...) do {} while(0)
+#endif
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 // WarpSpecialized Mainloop
@@ -575,6 +602,11 @@ struct CollectiveMma<
       tCrA, tCrB};
   }
 
+#if HACK_GEMM_WRITE_SLM_ONCE
+  uint32_t smem_pipe_write_count = 0;
+  uint32_t smem_pipe_read_count = 0;
+#endif
+
   /// Perform a collective-scoped matrix multiply-accumulate
   /// Producer Perspective
   template <
@@ -600,23 +632,100 @@ struct CollectiveMma<
 
     auto barrier_token = mainloop_pipeline.producer_try_acquire(mainloop_pipe_producer_state);
 
+    TRACE_LOAD(
+      print("threadIdx=("); print(threadIdx.x); print(", "); print(threadIdx.y); print(", "); print(threadIdx.z);
+      print(") blockIdx=("); print(blockIdx.x); print(", "); print(blockIdx.y); print(", "); print(blockIdx.z);
+      print(") blockDim=("); print(blockDim.x); print(", "); print(blockDim.y); print(", "); print(blockDim.z);
+      print(") gridDim=("); print(gridDim.x); print(", "); print(gridDim.y); print(", "); print(gridDim.z); print(")\n");
+    );
+
+#if HACK_GEMM_WRITE_SLM_ONCE
+    auto cluster_layout_vmnk = tiled_divide(make_layout(cluster_shape_), make_tile(typename TiledMma::AtomThrID{}));
+    uint32_t const per_cta_bytes_a =
+      cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutA{})) * cute::sizeof_bits_v<ElementA>) / size<2>(cluster_layout_vmnk);
+    uint32_t const per_cta_bytes_b =
+      cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutB{})) * cute::sizeof_bits_v<ElementB>) / size<1>(cluster_layout_vmnk);
+    uint32_t const per_cta_bytes = per_cta_bytes_a + per_cta_bytes_b;
+    TRACE_LOAD(
+      PRINT(mcast_mask_a);
+      PRINT(mcast_mask_b);
+      PRINT(AtomThrShapeMNK{});
+      PRINT(SmemLayoutA{});
+      PRINT(SmemLayoutB{});
+      PRINT(cosize(take<0,3>(SmemLayoutA{})));
+      PRINT(cosize(take<0,3>(SmemLayoutB{})));
+      PRINT(cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutA{})) * cute::sizeof_bits_v<ElementA>));
+      PRINT(cutlass::bits_to_bytes(size(AtomThrShapeMNK{}) * cosize(take<0,3>(SmemLayoutB{})) * cute::sizeof_bits_v<ElementB>));
+      PRINT(TmaTransactionBytes);
+      print("cluster_layout_vmnk=");print(cluster_layout_vmnk); print(" per_cta_bytes="); print(per_cta_bytes); print("\n");
+    );
+#endif
+
     // Issue the Mainloop loads
     CUTLASS_PRAGMA_NO_UNROLL
     while (k_tile_count > 0) {
       // LOCK mainloop_pipe_producer_state for _writing_
+      TRACE_LOAD(
+        print("[TMA] producer_acquire: stage="); print(mainloop_pipe_producer_state.index());
+        print(" count="); print(mainloop_pipe_producer_state.count());
+        print(" k_tile_count="); print(k_tile_count); print("\n");
+      );
       mainloop_pipeline.producer_acquire(mainloop_pipe_producer_state, barrier_token);
 
       using BarrierType = typename MainloopPipeline::ProducerBarrierType;
       BarrierType* tma_barrier = mainloop_pipeline.producer_get_barrier(mainloop_pipe_producer_state);
 
+#if HACK_GEMM_WRITE_SLM_ONCE
+      auto curr_mainloop_pipe_producer_state = mainloop_pipe_producer_state;
+#endif
+
       int write_stage = mainloop_pipe_producer_state.index();
       ++mainloop_pipe_producer_state;
       barrier_token = mainloop_pipeline.producer_try_acquire(mainloop_pipe_producer_state);
 
+#if HACK_GEMM_WRITE_SLM_ONCE
+      if (++smem_pipe_write_count <= MainloopPipeline::Stages) {
+#endif
       if (cute::elect_one_sync()) {
         copy(observed_tma_load_a_->with(*tma_barrier, mcast_mask_a), tAgA(_,*k_tile_iter), tAsA(_,write_stage));
         copy(observed_tma_load_b_->with(*tma_barrier, mcast_mask_b), tBgB(_,*k_tile_iter), tBsB(_,write_stage));
       }
+#if HACK_GEMM_WRITE_SLM_ONCE
+      } else {
+        TRACE_LOAD(
+          print("producer_commit: stage="); print(curr_mainloop_pipe_producer_state.index());print(" per_cta_bytes=");print(per_cta_bytes); print("\n");
+        );
+        // mainloop_pipeline.producer_commit(curr_mainloop_pipe_producer_state, TmaTransactionBytes);
+
+        auto const& params_ = mainloop_pipeline.impl_.params_;
+        uint32_t stage = curr_mainloop_pipe_producer_state.index();
+        auto const& full_barrier_ptr_ = mainloop_pipeline.impl_.full_barrier_ptr_;
+
+        if (params_.is_leader) {
+          // STEP 1 : Commit to self
+          full_barrier_ptr_[stage].complete_transaction(per_cta_bytes_a+per_cta_bytes_b);
+
+          // STEP 2 : Commit to other blocks in our cluster
+          dim3 local_block_id = cute::block_id_in_cluster();
+          uint32_t peer_id = local_block_id.x % size<0>(cluster_layout_vmnk);
+          uint32_t local_block_id_m = local_block_id.x / size<0>(cluster_layout_vmnk);
+
+          CUTLASS_PRAGMA_UNROLL
+          for(int n = 0; n < size<2>(cluster_layout_vmnk); ++n) {
+            uint32_t dst_block_id = cluster_layout_vmnk(peer_id,local_block_id_m,n,Int<0>{});
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id, per_cta_bytes_a, n!=local_block_id.y);
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id+1, per_cta_bytes_a);
+          }
+
+          CUTLASS_PRAGMA_UNROLL
+          for(int m = 0; m < size<1>(cluster_layout_vmnk); ++m) {
+            uint32_t dst_block_id = cluster_layout_vmnk(peer_id,m,local_block_id.y,Int<0>{});
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id, per_cta_bytes_b, m!=local_block_id_m);
+            full_barrier_ptr_[stage].complete_transaction(dst_block_id+1, per_cta_bytes_b);
+          }
+        }
+      }
+#endif
 
       --k_tile_count;
       ++k_tile_iter;
@@ -676,6 +785,11 @@ struct CollectiveMma<
 
     CUTLASS_PRAGMA_NO_UNROLL
     while (k_tile_count > 0) {
+      TRACE_MMA(
+        print("[MMA] consumer_wait: stage="); print(mainloop_pipe_consumer_state.index());
+        print(" count="); print(mainloop_pipe_consumer_state.count());
+        print(" k_tile_count="); print(k_tile_count); print("\n");
+      );
       // WAIT on mainloop_pipe_consumer_state until its data are available
       // (phase bit flips from mainloop_pipe_consumer_state.phase() value)
       mainloop_pipeline.consumer_wait(mainloop_pipe_consumer_state, barrier_token);
