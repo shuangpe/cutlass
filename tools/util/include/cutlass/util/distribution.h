@@ -78,14 +78,17 @@ struct Distribution {
   /// Random values are cast to integer after scaling by this power of two
   int int_scale;
 
+  int mask_ratio {-1};
+  int exclude_zero {-1};
+
   //
   // Methods
   //
 
-  Distribution() : kind(Invalid), int_scale(0) {}
+  Distribution() : kind(Invalid), int_scale(-1), mask_ratio(-1), exclude_zero(-1) {}
 
 /// Configures distribution as uniform random
-  Distribution &set_uniform(double _min, double _max, int _int_scale = 0, double _pnan = 0) {
+  Distribution &set_uniform(double _min, double _max, int _int_scale = -1, double _pnan = 0) {
     kind = Uniform;
     uniform.min = _min;
     uniform.max = _max;
@@ -95,7 +98,7 @@ struct Distribution {
   }
 
   /// Configures distribution as Gaussian distribution
-  Distribution &set_gaussian(double _mean, double _stddev, int _int_scale = 0, double _pnz = 1.0) {
+  Distribution &set_gaussian(double _mean, double _stddev, int _int_scale = -1, double _pnz = 1.0) {
     kind = Gaussian;
     gaussian.mean = _mean;
     gaussian.stddev = _stddev;

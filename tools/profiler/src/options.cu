@@ -373,6 +373,22 @@ void Options::Initialization::get_distribution(
       continue;  // next token
     }
 
+    // Exclude zero value in distribution - if >=0, zero values are excluded
+    if ((it->first.compare("exclude_zero") == 0) && !it->second.empty()) {
+      std::stringstream ss;
+      ss << it->second;
+      ss >> dist.exclude_zero;
+      continue;  // next token
+    }
+
+    // Mask ratio - if < 0, nothing performed.
+    if ((it->first.compare("mask_ratio") == 0) && !it->second.empty()) {
+      std::stringstream ss;
+      ss << it->second;
+      ss >> dist.mask_ratio;
+      continue;  // next token
+    }
+
     // Casts as integer without scaling
     if (it->first.compare("integer") == 0) {
       dist.int_scale = 0;
