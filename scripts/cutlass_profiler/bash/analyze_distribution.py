@@ -59,15 +59,14 @@ class GeneralBinMapper:
         return 5 if value > 5 else -5
 
 
-def find_mat_files():
-    a_file = None
-    b_file = None
+def find_mat_files(kernel_name):
+    """Return a list of all .mat files containing the kernel_name and ending with _A.mat or _B.mat."""
+    result = []
     for file in os.listdir('.'):
-        if file.endswith('_A.mat'):
-            a_file = file
-        elif file.endswith('_B.mat'):
-            b_file = file
-    return a_file, b_file
+        if (file.endswith('_A.mat') or file.endswith('_B.mat')):
+            if kernel_name=="" or kernel_name in file:
+                result.append(file)
+    return result
 
 
 def load_and_count_values(args):
@@ -83,26 +82,19 @@ def load_and_count_values(args):
     return {'counts': value_counts, 'file': file_path}
 
 
-def format_as_readable(a_counts, b_counts):
-    output = ""
-
-    def format_file_counts(file_counts):
-        file_output = f"File: {file_counts['file']}\n"
-        file_output += "-" * 80 + "\n"
-        total_elements = sum(file_counts['counts'].values())
-        file_output += f"{'Value':>10} | {'Count':>15} | {'Percentage':>10}\n"
-        file_output += "-" * 80 + "\n"
-        for value, count in sorted(file_counts['counts'].items()):
-            percentage = (count / total_elements) * 100
-            file_output += f"{value:>10.1f} | {count:>15} | {percentage:>9.2f}%\n"
-        file_output += "\n"
-        return file_output
-
-    if a_counts:
-        output += format_file_counts(a_counts)
-    if b_counts:
-        output += format_file_counts(b_counts)
-    return output
+def print_count(file_counts):
+    file_output = ""
+    if 'file' in file_counts.keys() and file_counts['file']:
+        file_output += f"File: {file_counts['file']}\n"
+    file_output += "-" * 80 + "\n"
+    total_elements = sum(file_counts['counts'].values())
+    file_output += f"{'Value':>10} | {'Count':>15} | {'Percentage':>10}\n"
+    file_output += "-" * 80 + "\n"
+    for value, count in sorted(file_counts['counts'].items()):
+        percentage = (count / total_elements) * 100
+        file_output += f"{value:>10.1f} | {count:>15} | {percentage:>9.2f}%\n"
+    file_output += "\n"
+    print(file_output)
 
 
 def write_to_csv(file_counts, bins, csv_file, tags):
@@ -124,10 +116,12 @@ def write_to_csv(file_counts, bins, csv_file, tags):
         writer.writerow(row)
 
 
-def merge_counts(a_counts, b_counts):
-    merged_counts = Counter(a_counts['counts'])
-    merged_counts.update(b_counts['counts'])
-    return {'counts': merged_counts, 'file': f"{a_counts['file']} + {b_counts['file']}"}
+def merge_counts(results):
+    """Merge a list of count dicts into one."""
+    merged = Counter()
+    for item in results:
+        merged.update(item['counts'])
+    return {'counts': merged}
 
 
 def main():
@@ -148,28 +142,27 @@ def main():
     bin_mapper = NVFP4BinMapper() if is_nvfp4 else GeneralBinMapper()
     bins = bin_mapper.bins
 
-    a_file, b_file = find_mat_files()
+    mat_files = find_mat_files(kernel_name)
 
-    with Pool(processes=2) as pool:
-        results = pool.map(load_and_count_values, [(a_file, bin_mapper), (b_file, bin_mapper)])
-
-    a_counts, b_counts = results
+    with Pool(processes=len(mat_files)) as pool:
+        results = pool.map(load_and_count_values, [(file, bin_mapper) for file in mat_files])
 
     if args.csv:
         if args.separate:
-            if a_counts:
-                write_to_csv(a_counts, bins, f"{args.csv}_A.csv", tags)
-            if b_counts:
-                write_to_csv(b_counts, bins, f"{args.csv}_B.csv", tags)
+            for i, counts in enumerate(results):
+                if counts:
+                    write_to_csv(counts, bins, f"{args.csv}_{i+1}.csv", tags)
         else:
-            merged_counts = merge_counts(a_counts, b_counts)
+            merged_counts = merge_counts(results)
             write_to_csv(merged_counts, bins, f"{args.csv}.csv", tags)
     else:
         if args.separate:
-            print(format_as_readable(a_counts, None), end='')
-            print(format_as_readable(None, b_counts), end='')
+            for counts in results:
+                if counts:
+                    print_count(counts)
         else:
-            print(format_as_readable(a_counts, b_counts), end='')
+            merged_counts = merge_counts(results)
+            print_count(merged_counts)
 
 
 if __name__ == "__main__":
