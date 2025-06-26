@@ -7,8 +7,10 @@ LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 CONFIG_FILE="batch_profile.cfg"
 OUTPUT_DIR=""
 BENCHNAME="Automation Workload"
-current_run=0  # Now a global variable
-total_runs=0   # Define total_runs as global variable
+
+total_runs=0
+current_run=0
+total_scopes_maskratios=0
 
 #===== Helper Functions =====
 log_info() {
@@ -78,6 +80,8 @@ check_all_configs() {
     log_info "    [$i]: ${kernel_array[$i]} (scopes: $kernel_scopes, count: $scope_count)"
   done
   log_info "  Total scopes across all kernels: $total_scopes"
+
+  total_scopes_maskratios=$((total_scopes * ${#mask_ratios[@]}))
 
   # Calculate total number of runs using the total number of scopes
   total_runs=0  # Reset the global variable
@@ -198,6 +202,10 @@ profile_kernel() {
   fi
 
   local dist_output=${OUTPUT_DIR}/data/${kernel_name}_mask${mask_ratio}_scope${scope}
+  if [ "$total_scopes_maskratios" -gt 15 ]; then
+    dist_output=${OUTPUT_DIR}/data/mask${mask_ratio}_scope${scope}
+  fi
+
   local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_run${current_run}
   local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
   log_info "${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
@@ -216,14 +224,15 @@ profile_kernel() {
     if [ $dump_data = true ]; then
       log_info "Analyzing data distribution and moving *.mat files..."
       ./analyze_distribution.py --tags ${tags} --csv ${dist_output}.data_dist
-      for file in ./*_A.mat; do
-        [ -e "$file" ] || continue
-        mv "$file" "${dist_output}_A.mat"
-      done
-      for file in ./*_B.mat; do
-        [ -e "$file" ] || continue
-        mv "$file" "${dist_output}_B.mat"
-      done
+      rm -rf *.mat
+      # for file in ./*_A.mat; do
+      #   [ -e "$file" ] || continue
+      #   mv "$file" "${dist_output}_A.mat"
+      # done
+      # for file in ./*_B.mat; do
+      #   [ -e "$file" ] || continue
+      #   mv "$file" "${dist_output}_B.mat"
+      # done
     fi
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
