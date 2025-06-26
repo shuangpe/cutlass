@@ -649,7 +649,11 @@ void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
   int tile = 256;
   bool need_manipulate = false;
   if (name_ == "A" || name_ == "B") {
+#if HACK_GEMM_WRITE_SLM_ONCE
+    if (true) {
+#else
     if (dist.mask_ratio >= 0) {
+#endif
       dist.exclude_zero = 1;
       need_manipulate = true;
     }
