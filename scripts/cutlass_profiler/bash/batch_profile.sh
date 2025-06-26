@@ -395,6 +395,17 @@ main() {
     nvidia-smi -i ${gpu_id} --reset-gpu-clocks
   fi
   log_info "$BENCHNAME completed! Total duration: ${hours}h ${minutes}m ${seconds}s"
+
+  refer_app="/dataset/shuangpeng/project/cutlass/HPC-Kernels-CUDA/xgemm/xgemm_cublasLt/xgemm_scope5"
+  refer_app_args="-type=8 -iter=2000 -warmup=500 -m=16384 -n=16384 -k=16384 -tc=1 -bs=1 -transa=1 -transb=0 -verify=0 -fastAccum=0"
+  if [ -f "$refer_app" ]; then
+    log_info "Execute reference measurement application to ensure environment is expected"
+    log_info "RUN xgemm with type=fp8 scope=[-5,5] freq=oob"
+    nvidia-smi -i ${gpu_id} --reset-gpu-clocks > /dev/null
+    $refer_app $refer_app_args | tee "${OUTPUT_DIR}/xgemm_scope5.log"
+  else
+    log_warning "Referencing application not found: $refer_app"
+  fi
 }
 
 main "$@"
