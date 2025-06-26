@@ -175,7 +175,7 @@ profile_kernel() {
     echo -ne "\r"
   fi
 
-  local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_wi${warmup_iterations}_pi${profiling_iterations}
+  local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_run${current_run}
   local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
   log_info "${PROFILER_SCRIPT} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
