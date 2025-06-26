@@ -202,11 +202,17 @@ profile_kernel() {
   local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
   log_info "${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
+  dump_data=false
+  if [ ! -f "${dist_output}.csv" ]; then
+    dump_data=true
+  fi
+
   if [ "$DRY_RUN" = "false" ]; then
     nvsmi_log start
-    ${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
+    ${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} \
+      --dump_data ${dump_data} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
     nvsmi_log stop
-    if [ ! -f "${dist_output}.csv" ]; then
+    if [ $dump_data = true ]; then
       ./analyze_distribution.py --tags ${tags} --csv ${dist_output}
     fi
     rename_log nvsmi.csv "${output}_nvsmi.txt"
