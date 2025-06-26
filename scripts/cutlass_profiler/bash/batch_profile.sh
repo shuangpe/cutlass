@@ -96,9 +96,15 @@ check_all_configs() {
 create_output_directory() {
   local date_prefix=$(date +%m%d)
   local dir_num=0
+  local dir_suffix=""
+
+  # Add tag to directory name if provided
+  if [ -n "$USER_TAG" ]; then
+    dir_suffix="_${USER_TAG}"
+  fi
 
   while true; do
-    OUTPUT_DIR="${date_prefix}_cutlass_profile_${dir_num}"
+    OUTPUT_DIR="${date_prefix}_cutlass_profile_${dir_num}${dir_suffix}"
     if [ ! -d "$OUTPUT_DIR" ]; then
       mkdir -p "$OUTPUT_DIR"
       mkdir -p "$OUTPUT_DIR/data"
@@ -191,6 +197,7 @@ profile_kernel() {
     echo -ne "\r"
   fi
 
+  local dist_output=${OUTPUT_DIR}/data/${kernel_name}_mask${mask_ratio}_scope${scope}.data_dist
   local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_run${current_run}
   local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
   log_info "${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
@@ -199,7 +206,9 @@ profile_kernel() {
     nvsmi_log start
     ${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
     nvsmi_log stop
-    ./analyze_distribution.py --tags ${tags} --csv ${output}
+    if [ ! -f "${dist_output}.csv" ]; then
+      ./analyze_distribution.py --tags ${tags} --csv ${dist_output}
+    fi
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
 
@@ -286,30 +295,45 @@ apply_frequency_and_run() {
 main() {
   # Process command line arguments
   DRY_RUN="false"
-  for arg in "$@"; do
-    if [ "$arg" = "--dry-run" ]; then
-      DRY_RUN="true"
-      log_info "Running in DRY RUN mode - commands will be shown but not executed"
-      shift
-    elif [ "$arg" = "-f" ]; then
-      shift
-      if [ -n "$1" ]; then
-        script_runner="$1"
-        log_info "Using custom profiler script: $script_runner"
+  USER_TAG=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry)
+        DRY_RUN="true"
+        log_info "Running in DRY RUN mode - commands will be shown but not executed"
         shift
-      else
-        log_error "Option -f requires an argument"
-        exit 1
-      fi
-    fi
+        ;;
+      --tag)
+        if [[ -n "$2" && "$2" != --* ]]; then
+          USER_TAG="$2"
+          log_info "Using tag for output directory: $USER_TAG"
+          shift 2
+        else
+          log_error "Option --tag requires an argument"
+          exit 1
+        fi
+        ;;
+      *)
+        # If it's a configuration file (first non-option argument)
+        if [[ -f "$1" && $# -eq 1 ]]; then
+          CONFIG_FILE="$1"
+        else
+          log_error "Unknown option: $1"
+          log_info "Usage: $0 [--dry] [--tag tagname] [config_file]"
+          exit 1
+        fi
+        shift
+        ;;
+    esac
   done
 
   # Initial checks
   check_root
 
   # Load configuration
-  if [ $# -eq 1 ]; then
-    if ! load_config "$1"; then
+  if [ -n "$CONFIG_FILE" ]; then
+    if ! load_config "$CONFIG_FILE"; then
       exit 2
     fi
   elif [ -f "$CONFIG_FILE" ]; then
