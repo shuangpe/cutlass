@@ -407,6 +407,11 @@ main() {
   else
     log_warning "Referencing application not found: $refer_app"
   fi
+
+  mv *log*.txt ${OUTPUT_DIR}
+  zip -r ${OUTPUT_DIR}.zip ${OUTPUT_DIR} -x "*.mat" > /dev/null
+  FULL_PATH=$(realpath "${OUTPUT_DIR}.zip")
+  echo -e "\n  scp b200:${FULL_PATH} ."
 }
 
 main "$@"
