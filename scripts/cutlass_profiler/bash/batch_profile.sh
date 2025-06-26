@@ -7,8 +7,8 @@ LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
 CONFIG_FILE="batch_profile.cfg"
 OUTPUT_DIR=""
 BENCHNAME="Automation Workload"
-PROFILER_SCRIPT="./cutlass_profiler_16k.sh"  # Default profiler script path
 current_run=0  # Now a global variable
+total_runs=0   # Define total_runs as global variable
 
 #===== Helper Functions =====
 log_info() {
@@ -50,29 +50,45 @@ load_config() {
 
 # Check all configuration parameters
 check_all_configs() {
+  if [ -z "$script_runner" ]; then
+    log_error "Profiler script runner is not set. Please set 'script_runner' in the configuration file."
+    exit 1
+  fi
+
   freq=($frequency)
-  scope=($init_scope)
   mode=($profile_mode)
 
-  # Output all configuration information
   log_info "Scan Configuration:"
+  log_info "  Profiler Script: $script_runner"
   log_info "  ${#mode[@]} Models: ${mode[*]}"
   log_info "  ${#freq[@]} Frequencies: ${freq[*]}"
-  log_info "  ${#scope[@]} InitScopes: ${scope[*]}"
   log_info "  ${#mask_ratios[@]} MaskRatios: ${mask_ratios[*]}"
   log_info "  ${#profile_iterations[@]} ProfileIterations:"
-  # Print each profile iteration line by line
   for ((i=0; i<${#profile_iterations[@]}; i++)); do
     log_info "    [$i]: ${profile_iterations[$i]}"
   done
   log_info "  ${#kernel_array[@]} Kernels:"
-  # Print each kernel line by line
-  for ((i=0; i<${#kernel_array[@]}; i++)); do
-    log_info "    [$i]: ${kernel_array[$i]}"
-  done
 
-  # Calculate total number of runs
-  total_runs=$((${#mode[@]} * ${#freq[@]} * ${#kernel_array[@]} * ${#scope[@]} * ${#mask_ratios[@]} * ${#profile_iterations[@]}))
+  local total_scopes=0
+  for ((i=0; i<${#kernel_array[@]}; i++)); do
+    IFS=',' read -r kernel_name operation <<< "${kernel_array[$i]}"
+    local kernel_scopes=$(get_init_scope "$kernel_name")
+    local scope_count=$(echo "$kernel_scopes" | wc -w)
+    total_scopes=$((total_scopes + scope_count))
+    log_info "    [$i]: ${kernel_array[$i]} (scopes: $kernel_scopes, count: $scope_count)"
+  done
+  log_info "  Total scopes across all kernels: $total_scopes"
+
+  # Calculate total number of runs using the total number of scopes
+  total_runs=0  # Reset the global variable
+  for ((i=0; i<${#kernel_array[@]}; i++)); do
+    IFS=',' read -r kernel_name operation <<< "${kernel_array[$i]}"
+    local kernel_scopes=$(get_init_scope "$kernel_name")
+    local scope_count=$(echo "$kernel_scopes" | wc -w)
+    local kernel_runs=$((${#mode[@]} * ${#freq[@]} * scope_count * ${#mask_ratios[@]} * ${#profile_iterations[@]}))
+    total_runs=$((total_runs + kernel_runs))
+    log_info "    Kernel [$i]: ${kernel_array[$i]} will run $kernel_runs tests"
+  done
   log_info "Total runs: $total_runs"
 }
 
@@ -177,11 +193,11 @@ profile_kernel() {
 
   local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_run${current_run}
   local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
-  log_info "${PROFILER_SCRIPT} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
+  log_info "${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
   if [ "$DRY_RUN" = "false" ]; then
     nvsmi_log start
-    ${PROFILER_SCRIPT} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
+    ${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
     nvsmi_log stop
     ./analyze_distribution.py --tags ${tags} --csv ${output}
     rename_log nvsmi.csv "${output}_nvsmi.txt"
@@ -207,6 +223,20 @@ profile_kernel() {
   local total_elapsed_fmt=$(format_time $total_elapsed_sec)
 
   log_info "Progress: [${current_run}/${total_runs} ${bar}] Elapsed: ${total_elapsed_fmt} | Est. remaining: ${est_remaining} | Avg Task: ${avg_time_fmt}"
+}
+
+# Get init_scope value for a specific kernel
+get_init_scope() {
+  local kernel_name="$1"
+  if [[ "$kernel_name" == *"ue4m3xe2m1_ue4m3xe2m1_f32"* ]]; then
+    echo "6"
+    return
+  fi
+  if [[ "$kernel_name" == *"ue8m0xe4m3_ue8m0xe4m3_f32"* ]] || [[ "$kernel_name" == *"f16_f16_f32"* ]]; then
+    echo "0.5 5"
+    return
+  fi
+  echo "5"
 }
 
 # Apply frequency and run kernel analysis
@@ -235,10 +265,12 @@ apply_frequency_and_run() {
     fi
   fi
 
+  local kernel_specific_scope=$(get_init_scope "$kernel_name")
+  log_info "Using scope value for kernel $kernel_name: $kernel_specific_scope"
+
   # Outer loop - iterate over modes
   for profile_type in "${mode[@]}"; do
-    # For each kernel, execute with different mask_ratio and scope combinations
-    for scope in $init_scope; do
+    for scope in $kernel_specific_scope; do
       for mask_ratio in "${mask_ratios[@]}"; do
         for iteration_tuple in "${profile_iterations[@]}"; do
           IFS=',' read -r warmup_iterations profiling_iterations <<< "$iteration_tuple"
@@ -262,8 +294,8 @@ main() {
     elif [ "$arg" = "-f" ]; then
       shift
       if [ -n "$1" ]; then
-        PROFILER_SCRIPT="$1"
-        log_info "Using custom profiler script: $PROFILER_SCRIPT"
+        script_runner="$1"
+        log_info "Using custom profiler script: $script_runner"
         shift
       else
         log_error "Option -f requires an argument"
@@ -300,7 +332,7 @@ main() {
 
   log_info "Starting $BENCHNAME (total tasks: $total_runs)"
 
-  current_run=0  # 现在是全局变量
+  current_run=0
   local start_time=$(date +%s)
   total_execution_time=0
 
