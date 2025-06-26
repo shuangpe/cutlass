@@ -652,6 +652,11 @@ void OperationProfiler::save_workspace(
 
   for (auto const & named_allocation : device_context) {
 
+    if ((named_allocation.first != "A") &&
+        (named_allocation.first != "B")) {
+      continue; // skip workspace allocations
+    }
+
     DeviceAllocation *allocation = named_allocation.second;
 
     if (allocation->layout() == library::LayoutTypeID::kUnknown) {
