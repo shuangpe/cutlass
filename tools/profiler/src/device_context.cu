@@ -83,18 +83,7 @@ static void initialize_allocation_with_data_distribution(
   DeviceAllocation *allocation,
   Distribution &data_distribution) {
 
-  if (allocation->name_ == "A" || allocation->name_ == "B") {
-    if (data_distribution.kind == Distribution::Sequential) {
-      allocation->initialize_sequential_host(
-        data_distribution);
-    }
-    else {
-      allocation->initialize_random_host(
-        options.initialization.seed + seed_shift,
-        data_distribution, options.initialization.mask_ratio);
-    }
-  }
-  else if (options.initialization.provider == library::Provider::kReferenceDevice) {
+  if (options.initialization.provider == library::Provider::kReferenceDevice) {
     if (data_distribution.kind == Distribution::Sequential) {
       allocation->initialize_sequential_device(
         data_distribution);

@@ -530,6 +530,83 @@ void DeviceAllocation::copy_to_host(void *ptr) {
   }
 }
 
+template <typename Tensor>
+static void fill_random_zeros(Tensor& host_tensor, int rows, int cols, int row_tile, int col_tile) {
+    if (mask_ratio == 0) {
+      std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio << ")" << std::endl;
+      return;
+    }
+
+    size_t tile_size = row_tile * col_tile;
+    size_t num_zeros = static_cast<size_t>(tile_size * mask_ratio / 100.0);
+
+    std::vector<int> indices(tile_size);
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(indices.begin(), indices.end(), g);
+
+    auto zero_value = typename Tensor::Element{0.0};
+
+    for (int idx = tile_size; idx > 0; --idx) {
+      int r = (idx-1) / col_tile;
+      int c = (idx-1) % col_tile;
+      host_tensor.host_data(r * cols + c) = host_tensor(idx-1);
+    }
+
+    for (size_t i = 0; i < num_zeros; ++i) {
+      int r = indices[i] / col_tile;
+      int c = indices[i] % col_tile;
+      host_tensor.host_data(i) = zero_value;
+    }
+
+    size_t zero_count = 0;
+
+    for (int idx = 0; idx < tile_size; ++idx) {
+      int r = idx / col_tile;
+      int c = idx % col_tile;
+      if (host_tensor.host_data(r * cols + c) == zero_value) {
+        ++zero_count;
+      }
+    }
+
+    std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols
+              << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio
+              << " expect_zeros=" << num_zeros << " actual_zeros=" << zero_count << ")" << std::endl;
+}
+
+template <typename Element, typename Layout>
+static void manipulate_tensor(DeviceAllocation &allocation, int rows, int cols, int row_tile, int col_tile) {
+
+  Coord<Layout::kRank> extent;
+  Coord<Layout::kStrideRank, typename Layout::Stride::Index> stride;
+
+  if (allocation.extent().size() != Layout::kRank) {
+    throw std::runtime_error("Allocation extent has invalid rank");
+  }
+
+  if (allocation.stride().size() != Layout::kStrideRank) {
+    throw std::runtime_error("Allocation stride has invalid rank");
+  }
+
+  vector_to_coord<Coord<Layout::kRank>, Layout::kRank>(extent, allocation.extent());
+  vector_to_coord<Coord<Layout::kStrideRank, typename Layout::Stride::Index>,
+                        Layout::kStrideRank>(stride, allocation.stride());
+
+  Layout layout(stride);
+  HostTensor<Element, Layout> host_tensor(extent, layout, false);
+
+  if (host_tensor.capacity() != allocation.batch_stride()) {
+    throw std::runtime_error("Unexpected capacity to equal.");
+  }
+
+  host_tensor.copy_in_device_to_host(
+    static_cast<Element const *>(allocation.data()),
+    allocation.batch_stride());
+
+}
+
 void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
   if (!bytes()) {
 #ifndef NDEBUG
@@ -544,6 +621,23 @@ void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
 
   // Instantiate calls to CURAND here. This file takes a long time to compile for
   // this reason.
+
+  auto copy_tiles = [&](auto data, int rows, int cols, int row_tile, int col_tile) {
+    // Fill the first tile with random zeros
+    random_zeros(data, rows, cols, row_tile, col_tile);
+
+    using Element = typename std::remove_pointer_t<decltype(data)>;
+
+    // Fill the rest of the matrix by copying from the tile
+    for (int r = 0; r < rows; ++r) {
+      for (int c = 0; c < cols; ++c) {
+        if (r < row_tile && c < col_tile) continue;
+        int idx_dst = r * cols + c;
+        int idx_src = (r % row_tile) * cols + (c % col_tile);
+        ReferenceFactory<Element>::get(data, idx_dst) = ReferenceFactory<Element>::get(data, idx_src);
+      }
+    }
+  };
 
   switch (type_) {
   case library::NumericTypeID::kF16:
@@ -609,6 +703,23 @@ void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
       seed,
       dist
     );
+
+    if (name_ == "A") {
+      auto host_ptr = reinterpret_cast<cutlass::float_e4m3_t *>(host_data.data());
+      if (layout_ == library::LayoutTypeID::kRowMajor) {
+        copy_tiles(host_ptr, extent_[0], extent_[1], 256, 256);
+      } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+        copy_tiles(host_ptr, extent_[1], extent_[0], 256, 256);
+      }
+    } else if (name_ == "B") {
+      auto host_ptr = reinterpret_cast<cutlass::float_e4m3_t *>(host_data.data());
+      if (layout_ == library::LayoutTypeID::kRowMajor) {
+        copy_tiles(host_ptr, extent_[0], extent_[1], 256, 256);
+      } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+        copy_tiles(host_ptr, extent_[1], extent_[0], 256, 256);
+      }
+    }
+
     break;
   case library::NumericTypeID::kFE5M2:
     cutlass::reference::device::BlockFillRandom<cutlass::float_e5m2_t>(
