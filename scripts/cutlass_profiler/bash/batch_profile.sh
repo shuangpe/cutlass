@@ -183,6 +183,7 @@ profile_kernel() {
     nvsmi_log start
     ${PROFILER_SCRIPT} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
     nvsmi_log stop
+    ./analyze_distribution.py --tags ${tags} --csv ${output}
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
 
