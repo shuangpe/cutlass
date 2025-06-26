@@ -663,7 +663,7 @@ public:
     consumer_release(state.index(), false);
   }
 
-private:
+public:
   Impl impl_;
   Params params_;
   EmptyBarrier *empty_barrier_ptr_;

@@ -490,7 +490,7 @@ public:
     consumer_release(state.index());
   }
 
-private:
+public:
   uint32_t dst_blockid_ = 0;
   uint32_t is_signaling_thread_ = 0;
   FullBarrier *full_barrier_ptr_ = nullptr;
