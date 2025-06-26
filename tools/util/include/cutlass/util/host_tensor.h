@@ -131,7 +131,7 @@ private:
   device_memory::allocation<StorageUnit> device_;
 
   /// number of containers 
-  size_t count_to_container_storage_unit_count(size_t count) {
+  size_t count_to_container_storage_unit_count(size_t count) const {
     return (count + kContainerTypeNumLogicalElements - 1) / kContainerTypeNumLogicalElements * kContainerTypeNumStorageUnit;
   }
 

@@ -528,6 +528,111 @@ void DeviceAllocation::copy_to_host(void *ptr) {
   }
 }
 
+template <typename Tensor>
+static void fill_random_zeros(Tensor& host_tensor, int rows, int cols, int row_tile, int col_tile, int mask_ratio) {
+    if (mask_ratio <= 0) {
+      std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio << ")" << std::endl;
+      return;
+    }
+
+    size_t tile_size = row_tile * col_tile;
+    size_t num_zeros = static_cast<size_t>(tile_size * mask_ratio / 100.0);
+
+    std::vector<int> indices(tile_size);
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(indices.begin(), indices.end(), g);
+
+    auto zero_value = typename Tensor::Element{0.0};
+
+    for (int idx = tile_size; idx > 0; --idx) {
+      int r = (idx-1) / col_tile;
+      int c = (idx-1) % col_tile;
+      host_tensor.host_data(r * cols + c) = host_tensor.host_data(idx-1);
+    }
+
+    for (size_t i = 0; i < num_zeros; ++i) {
+      int r = indices[i] / col_tile;
+      int c = indices[i] % col_tile;
+      host_tensor.host_data(i) = zero_value;
+    }
+
+    size_t zero_count = 0;
+
+    for (int idx = 0; idx < tile_size; ++idx) {
+      int r = idx / col_tile;
+      int c = idx % col_tile;
+      if (host_tensor.host_data(r * cols + c) == zero_value) {
+        ++zero_count;
+      }
+    }
+
+    std::cout << "Random zeros for first tile (shape=" << rows << "x" << cols
+              << " tiler=" << row_tile << "x" << col_tile << " mask_ratio=" << mask_ratio
+              << " expect_zeros=" << num_zeros << " actual_zeros=" << zero_count << ")" << std::endl;
+}
+
+template <typename Tensor>
+static void copy_tiles(Tensor& host_tensor, int rows, int cols, int row_tile, int col_tile) {
+  for (int r = 0; r < rows; ++r) {
+    for (int c = 0; c < cols; ++c) {
+      if (r < row_tile && c < col_tile) continue;
+      int idx_dst = r * cols + c;
+      int idx_src = (r % row_tile) * cols + (c % col_tile);
+      host_tensor.host_data(idx_dst) = host_tensor.host_data(idx_src);
+    }
+  }
+
+  uint32_t zero_count = 0;
+  uint32_t total_count = rows * cols;
+  auto zero_value = typename Tensor::Element{0.0};
+
+  for (uint32_t i =0; i < total_count; ++i) {
+    if (host_tensor.host_data(i) == zero_value) {
+      ++zero_count;
+    }
+  }
+
+  std::cout << "Zero count: " << zero_count << " out of " << total_count << " (" << (zero_count * 100.0 / total_count) << "%)" << std::endl;
+}
+
+template <typename TensorCoord, int Rank>
+struct vector_to_coord;
+
+template <typename Element, typename Layout>
+static void manipulate_tensor(DeviceAllocation &allocation, int rows, int cols, int row_tile, int col_tile, int mask_ratio) {
+  Coord<Layout::kRank> extent;
+  Coord<Layout::kStrideRank, typename Layout::Stride::Index> stride;
+
+  if (allocation.extent().size() != Layout::kRank) {
+    throw std::runtime_error("Allocation extent has invalid rank");
+  }
+
+  if (allocation.stride().size() != Layout::kStrideRank) {
+    throw std::runtime_error("Allocation stride has invalid rank");
+  }
+
+  vector_to_coord<Coord<Layout::kRank>, Layout::kRank>(extent, allocation.extent());
+  vector_to_coord<Coord<Layout::kStrideRank, typename Layout::Stride::Index>,
+                        Layout::kStrideRank>(stride, allocation.stride());
+
+  Layout layout(stride);
+  HostTensor<Element, Layout> host_tensor(extent, layout, false);
+
+  if (host_tensor.capacity() != allocation.batch_stride()) {
+    throw std::runtime_error("Unexpected capacity to equal.");
+  }
+
+  host_tensor.copy_in_device_to_host(static_cast<Element const *>(allocation.data()), allocation.batch_stride());
+
+  fill_random_zeros(host_tensor, rows, cols, row_tile, col_tile, mask_ratio);
+  copy_tiles(host_tensor, rows, cols, row_tile, col_tile);
+
+  host_tensor.copy_out_host_to_device(static_cast<Element*>(allocation.data()), allocation.batch_stride());
+}
+
 void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
   if (!bytes()) {
 #ifndef NDEBUG
@@ -543,14 +648,44 @@ void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
   // Instantiate calls to CURAND here. This file takes a long time to compile for
   // this reason.
 
+  bool need_manipulate = false;
+  if (name_ == "A" || name_ == "B") {
+    if (dist.mask_ratio >= 0) {
+      dist.exclude_zero = 1;
+      need_manipulate = true;
+    }
+  }
+
   switch (type_) {
   case library::NumericTypeID::kF16:
-    cutlass::reference::device::BlockFillRandom<cutlass::half_t>(
-      reinterpret_cast<cutlass::half_t *>(pointer_),
-      capacity_,
-      seed,
-      dist
-    );
+    if (!need_manipulate) {
+      cutlass::reference::device::BlockFillRandom<cutlass::half_t>(
+        reinterpret_cast<cutlass::half_t *>(pointer_),
+        capacity_,
+        seed,
+        dist
+      );
+    } else {
+      cutlass::reference::device::BlockFillRandom<cutlass::half_t>(
+        reinterpret_cast<cutlass::half_t *>(pointer_),
+        256*128,
+        seed,
+        dist
+      );
+      if (name_ == "A") {
+        if (layout_ == library::LayoutTypeID::kRowMajor) {
+          manipulate_tensor<cutlass::half_t, layout::RowMajor>(*this, extent_[0], extent_[1], 256, 128, dist.mask_ratio);
+        } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+          manipulate_tensor<cutlass::half_t, layout::ColumnMajor>(*this, extent_[1], extent_[0], 128, 256, dist.mask_ratio);
+        }
+      } else if (name_ == "B") {
+        if (layout_ == library::LayoutTypeID::kRowMajor) {
+          manipulate_tensor<cutlass::half_t, layout::RowMajor>(*this, extent_[0], extent_[1], 128, 256, dist.mask_ratio);
+        } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+          manipulate_tensor<cutlass::half_t, layout::ColumnMajor>(*this, extent_[1], extent_[0], 256, 128, dist.mask_ratio);
+        }
+      }
+    }
     break;
   case library::NumericTypeID::kBF16:
     cutlass::reference::device::BlockFillRandom<cutlass::bfloat16_t>(
@@ -601,12 +736,35 @@ void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
     );
     break;
   case library::NumericTypeID::kFE4M3:
-    cutlass::reference::device::BlockFillRandom<cutlass::float_e4m3_t>(
-      reinterpret_cast<cutlass::float_e4m3_t *>(pointer_),
-      capacity_,
-      seed,
-      dist
-    );
+    if (!need_manipulate) {
+      cutlass::reference::device::BlockFillRandom<cutlass::float_e4m3_t>(
+        reinterpret_cast<cutlass::float_e4m3_t *>(pointer_),
+        capacity_,
+        seed,
+        dist
+      );
+    } else {
+      cutlass::reference::device::BlockFillRandom<cutlass::float_e4m3_t>(
+        reinterpret_cast<cutlass::float_e4m3_t *>(pointer_),
+        256*128,
+        seed,
+        dist
+      );
+      if (name_ == "A") {
+        if (layout_ == library::LayoutTypeID::kRowMajor) {
+          manipulate_tensor<float_e4m3_t, layout::RowMajor>(*this, extent_[0], extent_[1], 256, 128, dist.mask_ratio);
+        } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+          manipulate_tensor<float_e4m3_t, layout::ColumnMajor>(*this, extent_[1], extent_[0], 128, 256, dist.mask_ratio);
+        }
+      } else if (name_ == "B") {
+        if (layout_ == library::LayoutTypeID::kRowMajor) {
+          manipulate_tensor<float_e4m3_t, layout::RowMajor>(*this, extent_[0], extent_[1], 128, 256, dist.mask_ratio);
+        } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+          manipulate_tensor<float_e4m3_t, layout::ColumnMajor>(*this, extent_[1], extent_[0], 256, 128, dist.mask_ratio);
+        }
+      }
+    }
+
     break;
   case library::NumericTypeID::kFE5M2:
     cutlass::reference::device::BlockFillRandom<cutlass::float_e5m2_t>(
@@ -649,12 +807,34 @@ void DeviceAllocation::initialize_random_device(int seed, Distribution dist) {
     );
     break;
   case library::NumericTypeID::kFE2M1:
-    cutlass::reference::device::BlockFillRandom<cutlass::float_e2m1_t>(
-      reinterpret_cast<cutlass::float_e2m1_t *>(pointer_),
-      capacity_,
-      seed,
-      dist
-    );
+    if (!need_manipulate) {
+      cutlass::reference::device::BlockFillRandom<cutlass::float_e2m1_t>(
+        reinterpret_cast<cutlass::float_e2m1_t *>(pointer_),
+        capacity_,
+        seed,
+        dist
+      );
+    } else {
+      cutlass::reference::device::BlockFillRandom<cutlass::float_e2m1_t>(
+        reinterpret_cast<cutlass::float_e2m1_t *>(pointer_),
+        256*256,
+        seed,
+        dist
+      );
+      if (name_ == "A") {
+        if (layout_ == library::LayoutTypeID::kRowMajor) {
+          manipulate_tensor<float_e2m1_t, layout::RowMajor>(*this, extent_[0], extent_[1], 256, 256, dist.mask_ratio);
+        } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+          manipulate_tensor<float_e2m1_t, layout::ColumnMajor>(*this, extent_[1], extent_[0], 256, 256, dist.mask_ratio);
+        }
+      } else if (name_ == "B") {
+        if (layout_ == library::LayoutTypeID::kRowMajor) {
+          manipulate_tensor<float_e2m1_t, layout::RowMajor>(*this, extent_[0], extent_[1], 256, 256, dist.mask_ratio);
+        } else if (layout_ == library::LayoutTypeID::kColumnMajor) {
+          manipulate_tensor<float_e2m1_t, layout::ColumnMajor>(*this, extent_[1], extent_[0], 256, 256, dist.mask_ratio);
+        }
+      }
+    }
     break;
   case library::NumericTypeID::kF64:
     cutlass::reference::device::BlockFillRandom<double>(

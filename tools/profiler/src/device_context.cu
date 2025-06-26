@@ -50,6 +50,7 @@ DeviceAllocation *DeviceContext::allocate_block(
   int device = options.device.device_id(device_index);
   device_memory_.emplace_back(type, capacity, device);
   DeviceAllocation *allocation = &device_memory_.back();
+  allocation->name_ = name;
 
   allocations_[name] = allocation;
   return allocation;
@@ -70,6 +71,7 @@ DeviceAllocation *DeviceContext::allocate_tensor(
   device_memory_.emplace_back(type, layout_id, extent, stride, batch_count,
                               device);
   DeviceAllocation *allocation = &device_memory_.back();
+  allocation->name_ = name;
 
   allocations_[name] = allocation;
   return allocation;

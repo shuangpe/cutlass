@@ -810,14 +810,21 @@ void BlockFillRandomUniform(
   int bits = -1,                          ///< If non-negative, specifies number of fractional bits that
                                           ///  are not truncated to zero. Permits reducing precision of
                                           ///  data.
+  int exclude_zero = 0,
   double pnan = 0,                        ///< Percentage of NaN elements.
   cudaStream_t stream = nullptr) {
 
   using RandomFunc = detail::RandomUniformFunc<Element>;
 
-  typename RandomFunc::Params params(seed, max, min);
+  typename RandomFunc::Params params(seed, max, min, bits, pnan, exclude_zero);
 
-  std::cout << "Calling reference::device::BlockFillRandomUniform(int_scale= " << params.int_scale << ", exclude_zero=" << params.exclude_zero << ")" << std::endl;
+  if constexpr (std::is_same_v<Element, cutlass::half_t> ||
+                std::is_same_v<Element, cutlass::float_e4m3_t> ||
+                std::is_same_v<Element, cutlass::float_e2m1_t>) {
+    std::cout << "Calling device::BlockFillRandomUniform(max=" << params.max
+              << " range=" << params.range << " int_scale=" << params.int_scale
+              << " exclude_zero=" << params.exclude_zero << " pnan=" << params.pnan << ")" << std::endl;
+  }
 
   BlockForEach<Element, RandomFunc>(ptr, capacity, params, /*grid_size*/0, /*block_size*/0, stream);
 }
@@ -1851,6 +1858,7 @@ void BlockFillRandom(
       static_cast<Real>(dist.uniform.max),
       static_cast<Real>(dist.uniform.min),
       dist.int_scale,
+      dist.exclude_zero,
       dist.uniform.pnan,
       stream);
   }
