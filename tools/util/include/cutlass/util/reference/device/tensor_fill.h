@@ -817,6 +817,8 @@ void BlockFillRandomUniform(
 
   typename RandomFunc::Params params(seed, max, min);
 
+  std::cout << "Calling reference::device::BlockFillRandomUniform(int_scale= " << params.int_scale << ", exclude_zero=" << params.exclude_zero << ")" << std::endl;
+
   BlockForEach<Element, RandomFunc>(ptr, capacity, params, /*grid_size*/0, /*block_size*/0, stream);
 }
 
