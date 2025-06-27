@@ -84,6 +84,10 @@ def find_mat_files(scan_path, exclude):
     return result
 
 
+# Global variables for output directory and remove_processed flag
+output_dir = None
+remove_processed = None
+
 def load_and_count_values(file_path):
     """Load values from a file, map them to bins, and count occurrences."""
 
@@ -107,6 +111,7 @@ def load_and_count_values(file_path):
     except Exception:
         total_lines = None
 
+    processed = False
     start_time = time.time()
 
     try:
@@ -123,29 +128,31 @@ def load_and_count_values(file_path):
                         logger.info(f"Processing {parent_dirname}: {line_count}/{total_lines} lines ({percent:.2f}%)")
                     else:
                         logger.info(f"Processing {parent_dirname}: {line_count} lines processed")
+            processed = True
     except Exception as e:
         logging.error(f"Error processing file {file_path}: {e}")
 
-    elapsed = time.time() - start_time
-    logger.info(f"Finished processing {parent_dirname} in {elapsed:.2f} seconds")
-    return {'counts': value_counts, 'file': file_path}
-
-
-def write_to_csv(counts, output_dir, remove_processed=False):
-    """Write the bin counts to a CSV file."""
-    file_path = counts['file']
-    dirname = os.path.dirname(file_path)
-    parent_dirname = os.path.basename(dirname)
-
-    if remove_processed:
+    if processed and remove_processed:
         try:
-            os.remove(file_path)
+            subprocess.run(['rm', '-rf', file_path], check=True)
             logger.info(f"Removed file: {file_path}")
-            if os.path.isdir(dirname) and not os.listdir(dirname):
-                os.rmdir(dirname)
+            dirname = os.path.dirname(file_path)
+            if not os.listdir(dirname):
+                subprocess.run(['rm', '-rf', dirname], check=True)
                 logger.info(f"Removed empty directory: {dirname}")
         except Exception as e:
             logger.warning(f"Failed to remove file or directory: {e}")
+
+    write_to_csv(file_path, value_counts, output_dir)
+
+    elapsed = time.time() - start_time
+    logger.info(f"Finished processing {parent_dirname} in {elapsed:.2f} seconds")
+
+
+def write_to_csv(file_path, value_counts, output_dir):
+    """Write the bin counts to a CSV file."""
+    dirname = os.path.dirname(file_path)
+    parent_dirname = os.path.basename(dirname)
 
     # Parse parent_dirname: expected format is {kernel_name}.{mask_ratio}.{scope}.{run_id}
     kernel_name = mask_ratio = scope = run_id = ""
@@ -157,14 +164,20 @@ def write_to_csv(counts, output_dir, remove_processed=False):
     bin_mapper = NVFP4BinMapper() if is_nvfp4 else GeneralBinMapper()
     bins = bin_mapper.bins
 
+    mat_type = "-"
+    if file_path.endswith('_A.mat'):
+        mat_type = "A"
+    elif file_path.endswith('_B.mat'):
+        mat_type = "B"
+
     csv_path = os.path.join(output_dir, f"{kernel_name}.csv")
-    header = ["Kernel", "Scope", "MaskRatio", "RunID"]
-    row = [kernel_name, scope, mask_ratio, run_id]
-    total_elements = sum(counts['counts'].values())
+    header = ["Kernel", "Scope", "MaskRatio", "RunID", "MatType"]
+    row = [kernel_name, scope, mask_ratio, run_id, mat_type]
+    total_elements = sum(value_counts.values())
 
     for value in bins:
         header.append(f"Count{value}")
-        count = counts['counts'].get(value, 0)
+        count = value_counts.get(value, 0)
         percentage = count / total_elements if total_elements > 0 else 0
         row.append(f"{percentage:.4f}")
 
@@ -180,45 +193,50 @@ def write_to_csv(counts, output_dir, remove_processed=False):
         logger.error(f"Error writing to CSV {csv_path}: {e}")
 
 
-def process_files(scan_dir, output_dir, files_in_analysis, processes=8, remove_processed=False):
+def process_files(scan_dir, processes):
     """Process files in the scan directory."""
-    results = []
+
+    files_in_analysis = set()
     pool = Pool(processes=processes)
+
+    logger.info(f"Sleeping for 5 seconds before starting to scan {scan_dir}...")
+    time.sleep(5)
+
+    retry_count = 0
+
     try:
-        while True:
+        while retry_count < 15:
             mat_files = find_mat_files(scan_dir, files_in_analysis)
-            if not mat_files and results:
-                break
+            if mat_files:
+                logger.info(f"Found {len(mat_files)} new files in {scan_dir}.")
+                retry_count = 0
+            else:
+                if pool._cache and any(not r.ready() for r in pool._cache.values()):
+                    logger.info("No new files found, but there are unfinished tasks. Sleeping for 10 seconds before re-scanning...")
+                else:
+                    logger.info(f"No new files found and all tasks finished. Sleeping for 10 seconds before re-scanning...")
+                    retry_count += 1
+                time.sleep(10)
+                continue
 
             for file in mat_files:
                 files_in_analysis.add(file)
-                results.append((file, pool.apply_async(load_and_count_values, args=(file,))))
+                logger.info(f"Added file to analysis: {file}")
+                pool.apply_async(load_and_count_values, args=(file,))
 
-            # Check and process finished results
-            i = 0
-            while i < len(results):
-                file, async_result = results[i]
-                if async_result.ready():
-                    counts = async_result.get()
-                    write_to_csv(counts, output_dir, remove_processed=remove_processed)
-                    logger.info(f"Processed file: {file}")
-                    results.pop(i)
-                else:
-                    i += 1
-
-            if not mat_files and results:
-                time.sleep(10)
     except KeyboardInterrupt:
         logger.info("KeyboardInterrupt received, terminating pool.")
         pool.terminate()
         pool.join()
         raise
     finally:
+        logger.info("Waiting for all processes to complete...")
         pool.close()
         pool.join()
 
 
 def main():
+    global output_dir, remove_processed
     parser = argparse.ArgumentParser(
         description="Count values in .mat files.",
         allow_abbrev=False  # Prevent ambiguous short options
@@ -235,25 +253,28 @@ def main():
                         help="Remove processed .mat files after analysis.")
     args = parser.parse_args()
 
+    # Set global variables
+    output_dir = args.output_dir
+    remove_processed = args.remove_processed
+
     # Ensure output_dir exists
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # Add file handler for logging to output_dir
-    log_file = os.path.join(args.output_dir, "analyze_distribution.log")
+    log_file = os.path.join(output_dir, "analyze_distribution.log")
     fh = logging.FileHandler(log_file, mode='a')
     fh.setFormatter(formatter)
     fh.setLevel(logging.INFO)
     logger.addHandler(fh)
 
     if args.quiet:
-        logger.setLevel(logging.CRITICAL)
-        fh.setLevel(logging.INFO)  # Still log to file even if quiet
-
-    files_in_analysis = set()
+        # Only suppress console output, not file logging
+        ch.setLevel(logging.CRITICAL)
+        logger.setLevel(logging.INFO)
 
     try:
-        logger.info(f"Starting analysis. Scanning: {args.scan_dir}, Output: {args.output_dir}, Processes: {args.processes}")
-        process_files(args.scan_dir, args.output_dir, files_in_analysis, processes=args.processes, remove_processed=args.remove_processed)
+        logger.info(f"Starting analysis. Scanning: {args.scan_dir}, Output: {output_dir}, Processes: {args.processes}, Remove: {remove_processed}")
+        process_files(args.scan_dir, args.processes)
         logger.info("Analysis completed.")
     except KeyboardInterrupt:
         logger.info("Process interrupted by user.")
