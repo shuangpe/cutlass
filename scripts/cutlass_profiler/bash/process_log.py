@@ -418,7 +418,7 @@ def main():
         sys.exit(1)
 
     current_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-    parse_script_path = os.path.abspath(current_dir / "../../gpu_monitor/parsers/parse_nvsim_log.py")
+    parse_script_path = os.path.abspath(current_dir / "../../parsers/parse_nvsim_log.py")
 
     if not os.path.exists(parse_script_path):
         print(f"Error: Script {parse_script_path} not found")
