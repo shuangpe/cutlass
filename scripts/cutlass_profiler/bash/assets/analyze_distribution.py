@@ -59,18 +59,23 @@ class GeneralBinMapper:
         return 5 if value > 5 else -5
 
 
-def find_mat_files(kernel_name):
-    """Return a list of all .mat files containing the kernel_name and ending with _A.mat or _B.mat."""
+def find_mat_files(scan_path):
+    """Return a list of all .mat files ending with _A.mat or _B.mat in scan_path."""
     result = []
-    for file in os.listdir('.'):
+    for file in os.listdir(scan_path):
         if (file.endswith('_A.mat') or file.endswith('_B.mat')):
-            if kernel_name=="" or kernel_name in file:
-                result.append(file)
+            result.append(os.path.join(scan_path, file))
     return result
 
 
-def load_and_count_values(args):
-    file_path, bin_mapper = args
+def load_and_count_values(file_path):
+    file_basename = os.path.basename(file_path)
+    parent_dir_name = os.path.basename(os.path.dirname(file_path))
+
+    is_nvfp4 = "ue4m3xe2m1_ue4m3xe2m1" in file_basename
+    bin_mapper = NVFP4BinMapper() if is_nvfp4 else GeneralBinMapper()
+    bins = bin_mapper.bins
+
     value_counts = Counter()
 
     with open(file_path, 'r') as f:
@@ -126,26 +131,26 @@ def merge_counts(results):
 
 def main():
     parser = argparse.ArgumentParser(description="Count values in .mat files.")
+    parser.add_argument("--scan-path", type=str, default=".", help="Directory to scan for .mat files (default: current directory).")
     parser.add_argument("--separate", action="store_true", help="Separate the output for A and B files (default: combined output).")
     parser.add_argument("--csv", type=str, help="Write the statistics to a CSV file. Provide the base filename (e.g., 'output').")
     parser.add_argument("--tags", type=str, help="Add tags to the CSV file. Format: <column:tag,...> (e.g., 'Experiment:Test1,Run:42').")
     args = parser.parse_args()
 
     tags = {}
-    kernel_name = ""
 
-    if args.tags:
-        tags = dict(tag.split(':') for tag in args.tags.split(','))
-        kernel_name = tags.get("Kernel", "")
+    # is_nvfp4 = "ue4m3xe2m1_ue4m3xe2m1" in kernel_name
+    # bin_mapper = NVFP4BinMapper() if is_nvfp4 else GeneralBinMapper()
+    # bins = bin_mapper.bins
 
-    is_nvfp4 = "ue4m3xe2m1_ue4m3xe2m1" in kernel_name
-    bin_mapper = NVFP4BinMapper() if is_nvfp4 else GeneralBinMapper()
-    bins = bin_mapper.bins
+    
 
-    mat_files = find_mat_files(kernel_name)
-
-    with Pool(processes=len(mat_files)) as pool:
-        results = pool.map(load_and_count_values, [(file, bin_mapper) for file in mat_files])
+    with Pool(processes=8) as pool:
+        results = []
+        mat_files = find_mat_files(args.scan_path)
+        for file in mat_files:
+            results.append(pool.apply_async(load_and_count_values, args=((file, bin_mapper),)))
+        results = [r.get() for r in results]
 
     if args.csv:
         if args.separate:
