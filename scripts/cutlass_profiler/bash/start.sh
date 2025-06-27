@@ -61,14 +61,13 @@ run_profile() {
   local cfg_file="$1"
   local out_dir="$2"
   local tag="$3"
-  bash "$assets_dir/batch_profile.sh" --output "$out_dir" --tag "$tag" "$assets_dir/config/$cfg_file" | tee "full_log.$tag.txt"
+  bash "$assets_dir/batch_profile.sh" --tag "$tag" --output "$out_dir" \
+    "$SCRIPT_DIR/assets/config/common.cfg" "$assets_dir/config/$cfg_file" | tee "full_log.$tag.txt"
 }
 
 run_app() {
   local app_names=("$@")
   local out_dir="$SCRIPT_DIR/b200_bench"
-
-  source "$SCRIPT_DIR/assets/config/common.cfg"
 
   for app_name in "${app_names[@]}"; do
     export APP_DIR="${APP_DIR_MAP[$app_name]}"
