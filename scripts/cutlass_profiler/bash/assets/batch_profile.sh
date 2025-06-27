@@ -2,11 +2,13 @@
 # Automation workload execution script
 
 #===== Global Variables =====
-SCRIPT_NAME=$(basename "$0")
-LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
-CONFIG_FILE="batch_profile.cfg"
+BENCHNAME=""
 OUTPUT_DIR=""
-BENCHNAME="Automation Workload"
+CONFIG_FILE=""
+declare -A DUMP_DIR_INDEX  # Global associative array to track processed dump_dirname
+
+LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 total_runs=0
 current_run=0
@@ -40,6 +42,9 @@ check_root() {
 load_config() {
   local config_file="$1"
 
+  # Set BENCHNAME as the basename of the config file without .cfg suffix
+  BENCHNAME=$(basename "$config_file" .cfg)
+
   if [ -f "$config_file" ]; then
     log_info "Reading configuration file: $config_file"
     source "$config_file"
@@ -52,17 +57,9 @@ load_config() {
 
 # Check all configuration parameters
 check_all_configs() {
-  if [ -z "$script_runner" ]; then
-    log_error "Profiler script runner is not set. Please set 'script_runner' in the configuration file."
-    exit 1
-  fi
-
   freq=($frequency)
-  mode=($profile_mode)
 
   log_info "Scan Configuration:"
-  log_info "  Profiler Script: $script_runner"
-  log_info "  ${#mode[@]} Models: ${mode[*]}"
   log_info "  ${#freq[@]} Frequencies: ${freq[*]}"
   log_info "  ${#mask_ratios[@]} MaskRatios: ${mask_ratios[*]}"
   log_info "  ${#profile_iterations[@]} ProfileIterations:"
@@ -89,7 +86,7 @@ check_all_configs() {
     IFS=',' read -r kernel_name operation <<< "${kernel_array[$i]}"
     local kernel_scopes=$(get_init_scope "$kernel_name")
     local scope_count=$(echo "$kernel_scopes" | wc -w)
-    local kernel_runs=$((${#mode[@]} * ${#freq[@]} * scope_count * ${#mask_ratios[@]} * ${#profile_iterations[@]}))
+    local kernel_runs=$((${#freq[@]} * scope_count * ${#mask_ratios[@]} * ${#profile_iterations[@]}))
     total_runs=$((total_runs + kernel_runs))
     log_info "    Kernel [$i]: ${kernel_array[$i]} will run $kernel_runs tests"
   done
@@ -116,7 +113,7 @@ create_output_directory() {
     OUTPUT_DIR="${base_dir%/}/${candidate_dir}"
     if [ ! -d "$OUTPUT_DIR" ]; then
       OUTPUT_DIR="${OUTPUT_DIR}${dir_suffix}"
-      mkdir -p "$OUTPUT_DIR" "$OUTPUT_DIR/data"
+      mkdir -p "$OUTPUT_DIR" "$OUTPUT_DIR/data" "$OUTPUT_DIR/data/mat"
       log_info "Created output directory: $OUTPUT_DIR"
       return
     fi
@@ -129,6 +126,12 @@ process_file_path() {
   local file_path="$1"
   local file_name=$(basename "$file_path")
   echo "${OUTPUT_DIR}/${file_name}"
+}
+
+# Record a command to the commands.txt file in the output directory
+record_command() {
+  local cmd="$1"
+  echo "$cmd" >> "${OUTPUT_DIR}/data/commands.txt"
 }
 
 # NVIDIA SMI logging
@@ -174,9 +177,9 @@ profile_kernel() {
   local freq="$5"
   local current_run="$6"
   local total_runs="$7"
-  local profile_type="$8"
-  local warmup_iterations="$9"
-  local profiling_iterations="${10}"
+  # local profile_type="$8"   # removed
+  local warmup_iterations="$8"
+  local profiling_iterations="$9"
 
   # Record the start time of the task
   local task_start_time=$(date +%s)
@@ -206,38 +209,32 @@ profile_kernel() {
     echo -ne "\r"
   fi
 
-  local dist_output=${OUTPUT_DIR}/data/${kernel_name}_mask${mask_ratio}_scope${scope}
-  if [ "$total_scopes_maskratios" -gt 15 ]; then
-    dist_output=${OUTPUT_DIR}/data/mask${mask_ratio}_scope${scope}
-  fi
+  local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_run${current_run}
+  local tags="Scenario:${scenario},Freq:${freq},Kernel:${kernel_name},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
+  log_info "runner.sh --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
-  local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_mode${profile_type}_run${current_run}
-  local tags="Freq:${freq},Kernel:${kernel_name},Hacking:${profile_type},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
-  log_info "${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
-
-  dump_data=false
-  if [ ! -f "${dist_output}.data_dist.csv" ]; then
+  local dump_dir=${kernel_name}_mask${mask_ratio}_scope${scope}
+  # Use global index to determine if dump_data is needed
+  if [[ -n "${DUMP_DIR_INDEX[$dump_dir]}" ]]; then
+    dump_data=false
+  else
     dump_data=true
-    rm -rf *.mat
+    DUMP_DIR_INDEX[$dump_dir]=1
   fi
+
+  command="${SCRIPT_DIR}/runners/runner.sh --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --dump_data ${dump_data} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
+  record_command "$($command --dry)"
 
   if [ "$DRY_RUN" = "false" ]; then
     nvsmi_log start
-    ${script_runner} --mode ${profile_type} --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} \
-      --dump_data ${dump_data} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}
+    eval $command
     nvsmi_log stop
     if [ $dump_data = true ]; then
-      log_info "Analyzing data distribution and moving *.mat files..."
-      ./analyze_distribution.py --tags ${tags} --csv ${dist_output}.data_dist
+      log_info "Moving *.mat files to $dump_dir"
+      dump_dir_full="${OUTPUT_DIR}/data/mat/${dump_dir}_run${current_run}"
+      mkdir -p "$dump_dir_full"
+      mv *_A.mat *_B.mat "$dump_dir_full" 2>/dev/null
       rm -rf *.mat
-      # for file in ./*_A.mat; do
-      #   [ -e "$file" ] || continue
-      #   mv "$file" "${dist_output}_A.mat"
-      # done
-      # for file in ./*_B.mat; do
-      #   [ -e "$file" ] || continue
-      #   mv "$file" "${dist_output}_B.mat"
-      # done
     fi
     rename_log nvsmi.csv "${output}_nvsmi.txt"
   fi
@@ -307,15 +304,12 @@ apply_frequency_and_run() {
   local kernel_specific_scope=$(get_init_scope "$kernel_name")
   log_info "Using scope value for kernel $kernel_name: $kernel_specific_scope"
 
-  # Outer loop - iterate over modes
-  for profile_type in "${mode[@]}"; do
-    for scope in $kernel_specific_scope; do
-      for mask_ratio in "${mask_ratios[@]}"; do
-        for iteration_tuple in "${profile_iterations[@]}"; do
-          IFS=',' read -r warmup_iterations profiling_iterations <<< "$iteration_tuple"
-          current_run=$((current_run + 1))
-          profile_kernel "$kernel_name" "$operation" "$mask_ratio" "$scope" "$freq_value" "$current_run" "$total_runs" "$profile_type" "$warmup_iterations" "$profiling_iterations"
-        done
+  for scope in $kernel_specific_scope; do
+    for mask_ratio in "${mask_ratios[@]}"; do
+      for iteration_tuple in "${profile_iterations[@]}"; do
+        IFS=',' read -r warmup_iterations profiling_iterations <<< "$iteration_tuple"
+        current_run=$((current_run + 1))
+        profile_kernel "$kernel_name" "$operation" "$mask_ratio" "$scope" "$freq_value" "$current_run" "$total_runs" "$warmup_iterations" "$profiling_iterations"
       done
     done
   done
@@ -392,6 +386,7 @@ main() {
     log_info "DRY RUN: Would set CUDA_VISIBLE_DEVICES=$gpu_id"
   else
     export CUDA_VISIBLE_DEVICES=$gpu_id
+    record_command "export CUDA_VISIBLE_DEVICES=$gpu_id"
     log_info "Setting CUDA visible devices: $gpu_id"
   fi
 
@@ -400,6 +395,10 @@ main() {
   current_run=0
   local start_time=$(date +%s)
   total_execution_time=0
+
+  # Start analyze_distribution.py in background
+  python3 ${SCRIPT_DIR}/analyze_distribution.py --scan-path ${OUTPUT_DIR}/data/mat &
+  ANALYZE_PID=$!
 
   for kernel_tuple in "${kernel_array[@]}"; do
     IFS=',' read -r kernel_name operation <<< "$kernel_tuple"
@@ -421,6 +420,23 @@ main() {
     nvidia-smi -i ${gpu_id} --reset-gpu-clocks
   fi
   log_info "$BENCHNAME completed! Total duration: ${hours}h ${minutes}m ${seconds}s"
+
+  WAIT_TIME=0
+  TIMEOUT=60
+  SLEEP_INTERVAL=5
+  while true; do
+    # Wait for .mat files to be processed, with timeout
+    if ! find "${OUTPUT_DIR}/data/mat" -type f -name "*.mat" | grep -q .; then
+      break
+    fi
+    if [ $WAIT_TIME -ge $TIMEOUT ]; then
+      log_warning "analyze_distribution.py (PID $ANALYZE_PID) did not finish in $TIMEOUT seconds, killing..."
+      pkill -P $ANALYZE_PID || kill -9 $ANALYZE_PID
+      break
+    fi
+    sleep $SLEEP_INTERVAL
+    WAIT_TIME=$((WAIT_TIME + SLEEP_INTERVAL))
+  done
 
   refer_app="/dataset/shuangpeng/project/cutlass/HPC-Kernels-CUDA/xgemm/xgemm_cublasLt/xgemm_scope5"
   refer_app_args="-type=8 -iter=2000 -warmup=500 -m=16384 -n=16384 -k=16384 -tc=1 -bs=1 -transa=1 -transb=0 -verify=0 -fastAccum=0"

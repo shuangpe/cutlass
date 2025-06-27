@@ -13,9 +13,15 @@ BUILD_DIR="$(realpath "$SCRIPT_DIR/../../../build")"
 # Global app name mapping
 declare -A APP_MAP=( ["0"]="baseline" ["1"]="baseline.zeromask" ["2"]="hacking" )
 
+declare -A APP_DIR_MAP=(
+  ["baseline"]="$BUILD_DIR/baseline"
+  ["baseline.zeromask"]="$BUILD_DIR/baseline"
+  ["hacking"]="$BUILD_DIR/hacking"
+)
+
 # Function to build the application
 build_baseline() {
-  baseline_dir="$BUILD_DIR/baseline"
+  baseline_dir=${APP_DIR_MAP["baseline"]}
   echo "Building the baseline..."
   mkdir -p "$baseline_dir"
   cd "$baseline_dir"
@@ -29,7 +35,7 @@ build_baseline() {
 }
 
 build_hacking() {
-  hacking_dir="$BUILD_DIR/hacking"
+  hacking_dir=${APP_DIR_MAP["hacking"]}
   echo "Building the hacking..."
   mkdir -p "$hacking_dir"
   cd "$hacking_dir"
@@ -61,7 +67,12 @@ run_profile() {
 run_app() {
   local app_names=("$@")
   local out_dir="$SCRIPT_DIR/b200_bench"
+
+  source "$SCRIPT_DIR/assets/config/common.cfg"
+
   for app_name in "${app_names[@]}"; do
+    export APP_DIR="${APP_DIR_MAP[$app_name]}"
+
     if [[ "$app_name" == "baseline" ]]; then
       echo "Running baseline application..."
       run_profile "baseline.cfg" "$out_dir" "baseline"
