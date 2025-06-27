@@ -202,7 +202,7 @@ profile_kernel() {
     echo -ne "Start kernel analysis in $secs seconds ..."
     while [ $secs -gt 0 ]; do
       local current_timestamp="[$(date '+%Y-%m-%d %H:%M:%S')]"
-      echo -ne "\r${current_timestamp} INFO: Start kernel analysis in $secs seconds ...   "
+      echo -ne "\r${current_timestamp} INFO: Start kernel analysis in $secs seconds ..."
       sleep 1
       ((secs--))
     done
@@ -321,6 +321,7 @@ main() {
   DRY_RUN="false"
   USER_TAG=""
   OUTPUT_BASE_DIR=""
+  CONFIG_FILES=()
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -350,12 +351,12 @@ main() {
         fi
         ;;
       *)
-        # If it's a configuration file (first non-option argument)
-        if [[ -f "$1" && $# -eq 1 ]]; then
-          CONFIG_FILE="$1"
+        # Collect all non-option arguments as config files
+        if [[ -f "$1" ]]; then
+          CONFIG_FILES+=("$1")
         else
-          log_error "Unknown option: $1"
-          log_info "Usage: $0 [--dry] [--tag tagname] [--output dir] [config_file]"
+          log_error "Unknown option or file not found: $1"
+          log_info "Usage: $0 [--dry] [--tag tagname] [--output dir] [config_file ...]"
           exit 1
         fi
         shift
@@ -366,17 +367,17 @@ main() {
   # Initial checks
   check_root
 
-  # Load configuration
-  if [ -n "$CONFIG_FILE" ]; then
-    if ! load_config "$CONFIG_FILE"; then
-      exit 2
-    fi
-  elif [ -f "$CONFIG_FILE" ]; then
-    load_config "$CONFIG_FILE"
-  else
-    log_error "Automation configuration file not found, this file is required"
+  # Load all configuration files
+  if [ ${#CONFIG_FILES[@]} -eq 0 ]; then
+    log_error "Automation configuration file not found, at least one config_file is required"
     exit 2
   fi
+
+  for config_file in "${CONFIG_FILES[@]}"; do
+    if ! load_config "$config_file"; then
+      exit 2
+    fi
+  done
 
   check_all_configs
   create_output_directory "$OUTPUT_BASE_DIR"
@@ -396,9 +397,11 @@ main() {
   local start_time=$(date +%s)
   total_execution_time=0
 
-  # Start analyze_distribution.py in background
-  python3 ${SCRIPT_DIR}/analyze_distribution.py --quiet --scan_dir ${OUTPUT_DIR}/data/mat --output_dir ${OUTPUT_DIR}/data &
-  ANALYZE_PID=$!
+  # Start analyze_distribution.py in background only if not dry run
+  if [ "$DRY_RUN" = "false" ]; then
+    python3 ${SCRIPT_DIR}/analyze_distribution.py --quiet --scan_dir ${OUTPUT_DIR}/data/mat --output_dir ${OUTPUT_DIR}/data &
+    ANALYZE_PID=$!
+  fi
 
   for kernel_tuple in "${kernel_array[@]}"; do
     IFS=',' read -r kernel_name operation <<< "$kernel_tuple"
@@ -437,6 +440,10 @@ main() {
     sleep $SLEEP_INTERVAL
     WAIT_TIME=$((WAIT_TIME + SLEEP_INTERVAL))
   done
+
+  if [ "$DRY_RUN" = "true" ]; then
+    exit 0
+  fi
 
   refer_app="/dataset/shuangpeng/project/cutlass/HPC-Kernels-CUDA/xgemm/xgemm_cublasLt/xgemm_scope5"
   refer_app_args="-type=8 -iter=2000 -warmup=500 -m=16384 -n=16384 -k=16384 -tc=1 -bs=1 -transa=1 -transb=0 -verify=0 -fastAccum=0"
