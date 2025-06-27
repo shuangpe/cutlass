@@ -53,22 +53,24 @@ build_app() {
 run_profile() {
   local assets_dir="$SCRIPT_DIR/assets"
   local cfg_file="$1"
-  local tag="$2"
-  bash "$assets_dir/batch_profile.sh" "$assets_dir/config/$cfg_file" --tag "$tag" | tee "full_log.$tag.txt"
+  local out_dir="$2"
+  local tag="$3"
+  bash "$assets_dir/batch_profile.sh" --output "$out_dir" --tag "$tag" "$assets_dir/config/$cfg_file" | tee "full_log.$tag.txt"
 }
 
 run_app() {
   local app_names=("$@")
+  local out_dir="$SCRIPT_DIR/b200_bench"
   for app_name in "${app_names[@]}"; do
     if [[ "$app_name" == "baseline" ]]; then
       echo "Running baseline application..."
-      run_profile "baseline.cfg" "baseline"
+      run_profile "baseline.cfg" "$out_dir" "baseline"
     elif [[ "$app_name" == "baseline.zeromask" ]]; then
       echo "Running baseline.zeromask application..."
-      run_profile "baseline.zeromask.cfg" "baseline.zeromask"
+      run_profile "baseline.zeromask.cfg" "$out_dir" "baseline.zeromask"
     elif [[ "$app_name" == "hacking" ]]; then
       echo "Running hacking application..."
-      run_profile "hacking.cfg" "hacking"
+      run_profile "hacking.cfg" "$out_dir" "hacking"
     else
       echo "Unknown application: $app_name"
       exit 1

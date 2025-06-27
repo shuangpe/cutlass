@@ -98,17 +98,22 @@ check_all_configs() {
 
 # Create output directory
 create_output_directory() {
+  local base_dir="$1"
   local date_prefix=$(date +%m%d)
   local dir_num=0
   local dir_suffix=""
 
-  # Add tag to directory name if provided
   if [ -n "$USER_TAG" ]; then
     dir_suffix="_${USER_TAG}"
   fi
 
+  if [ -z "$base_dir" ]; then
+    base_dir="."
+  fi
+
   while true; do
-    OUTPUT_DIR="${date_prefix}_cutlass_profile_${dir_num}"
+    local candidate_dir="${date_prefix}_cutlass_profile_${dir_num}"
+    OUTPUT_DIR="${base_dir%/}/${candidate_dir}"
     if [ ! -d "$OUTPUT_DIR" ]; then
       OUTPUT_DIR="${OUTPUT_DIR}${dir_suffix}"
       mkdir -p "$OUTPUT_DIR" "$OUTPUT_DIR/data"
@@ -321,6 +326,7 @@ main() {
   # Process command line arguments
   DRY_RUN="false"
   USER_TAG=""
+  OUTPUT_BASE_DIR=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -339,13 +345,23 @@ main() {
           exit 1
         fi
         ;;
+      --output)
+        if [[ -n "$2" && "$2" != --* ]]; then
+          OUTPUT_BASE_DIR="$2"
+          log_info "Using user-specified output base directory: $OUTPUT_BASE_DIR"
+          shift 2
+        else
+          log_error "Option --output requires an argument"
+          exit 1
+        fi
+        ;;
       *)
         # If it's a configuration file (first non-option argument)
         if [[ -f "$1" && $# -eq 1 ]]; then
           CONFIG_FILE="$1"
         else
           log_error "Unknown option: $1"
-          log_info "Usage: $0 [--dry] [--tag tagname] [config_file]"
+          log_info "Usage: $0 [--dry] [--tag tagname] [--output dir] [config_file]"
           exit 1
         fi
         shift
@@ -369,7 +385,7 @@ main() {
   fi
 
   check_all_configs
-  create_output_directory
+  create_output_directory "$OUTPUT_BASE_DIR"
 
   # Set CUDA visible devices
   if [ "$DRY_RUN" = "true" ]; then
