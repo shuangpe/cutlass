@@ -213,7 +213,7 @@ profile_kernel() {
   local tags="Scenario:${scenario},Freq:${freq},Kernel:${kernel_name},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
   log_info "runner.sh --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
-  local dump_dir=${kernel_name}_mask${mask_ratio}_scope${scope}
+  local dump_dir=${kernel_name}.${mask_ratio}.${scope}
   # Use global index to determine if dump_data is needed
   if [[ -n "${DUMP_DIR_INDEX[$dump_dir]}" ]]; then
     dump_data=false
@@ -231,7 +231,7 @@ profile_kernel() {
     nvsmi_log stop
     if [ $dump_data = true ]; then
       log_info "Moving *.mat files to $dump_dir"
-      dump_dir_full="${OUTPUT_DIR}/data/mat/${dump_dir}_run${current_run}"
+      dump_dir_full="${OUTPUT_DIR}/data/mat/${dump_dir}.${current_run}"
       mkdir -p "$dump_dir_full"
       mv *_A.mat *_B.mat "$dump_dir_full" 2>/dev/null
       rm -rf *.mat
@@ -397,7 +397,7 @@ main() {
   total_execution_time=0
 
   # Start analyze_distribution.py in background
-  python3 ${SCRIPT_DIR}/analyze_distribution.py --scan-path ${OUTPUT_DIR}/data/mat &
+  python3 ${SCRIPT_DIR}/analyze_distribution.py --quiet --scan_dir ${OUTPUT_DIR}/data/mat --output_dir ${OUTPUT_DIR}/data &
   ANALYZE_PID=$!
 
   for kernel_tuple in "${kernel_array[@]}"; do
