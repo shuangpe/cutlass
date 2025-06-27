@@ -14,6 +14,8 @@ total_runs=0
 current_run=0
 total_scopes_maskratios=0
 
+ANALYZE_PID=""
+
 #===== Helper Functions =====
 log_info() {
   local timestamp="[$(date '+%Y-%m-%d %H:%M:%S')]"
@@ -28,6 +30,36 @@ log_error() {
 log_warning() {
   local timestamp="[$(date '+%Y-%m-%d %H:%M:%S')]"
   echo "${timestamp} WARNING: $1" >&2
+}
+
+# Start the analyze_distribution.py background process if not already running
+start_dist_analyzer() {
+  if [ "$DRY_RUN" = "true" ]; then
+    return
+  fi
+  if [ -n "$ANALYZE_PID" ] && ps -p "$ANALYZE_PID" > /dev/null 2>&1; then
+    return
+  fi
+  # Try to find an existing process (by script path and output dir)
+  ANALYZE_PID=$(pgrep -f "analyze_distribution.py --quiet --scan_dir ${OUTPUT_DIR}/data/mat --output_dir ${OUTPUT_DIR}/data" | head -n 1)
+  if [ -z "$ANALYZE_PID" ] || ! ps -p "$ANALYZE_PID" > /dev/null 2>&1; then
+    python3 "${SCRIPT_DIR}/analyze_distribution.py" --quiet --remove --scan_dir "${OUTPUT_DIR}/data/mat" --output_dir "${OUTPUT_DIR}/data" &
+    ANALYZE_PID=$!
+    log_info "Started analyze_distribution.py (PID $ANALYZE_PID)"
+  fi
+}
+
+# Stop the analyze_distribution.py background process if running
+stop_dist_analyzer() {
+  if [ "$DRY_RUN" = "true" ]; then
+    return
+  fi
+  if [ -n "$ANALYZE_PID" ] && ps -p "$ANALYZE_PID" > /dev/null 2>&1; then
+    kill "$ANALYZE_PID"
+    wait "$ANALYZE_PID" 2>/dev/null
+    log_info "Stopped analyze_distribution.py (PID $ANALYZE_PID)"
+    ANALYZE_PID=""
+  fi
 }
 
 # Check if running as root
@@ -234,6 +266,7 @@ profile_kernel() {
       dump_dir_full="${OUTPUT_DIR}/data/mat/${dump_dir}.${current_run}"
       mkdir -p "$dump_dir_full"
       mv *_A.mat *_B.mat "$dump_dir_full" 2>/dev/null
+      start_dist_analyzer
       rm -rf *.mat
     fi
     rename_log nvsmi.csv "${output}_nvsmi.txt"
@@ -397,12 +430,6 @@ main() {
   local start_time=$(date +%s)
   total_execution_time=0
 
-  # Start analyze_distribution.py in background only if not dry run
-  if [ "$DRY_RUN" = "false" ]; then
-    python3 ${SCRIPT_DIR}/analyze_distribution.py --quiet --scan_dir ${OUTPUT_DIR}/data/mat --output_dir ${OUTPUT_DIR}/data &
-    ANALYZE_PID=$!
-  fi
-
   for kernel_tuple in "${kernel_array[@]}"; do
     IFS=',' read -r kernel_name operation <<< "$kernel_tuple"
     for freq_value in "${freq[@]}"; do
@@ -434,7 +461,7 @@ main() {
     fi
     if [ $WAIT_TIME -ge $TIMEOUT ]; then
       log_warning "analyze_distribution.py (PID $ANALYZE_PID) did not finish in $TIMEOUT seconds, killing..."
-      pkill -P $ANALYZE_PID || kill -9 $ANALYZE_PID
+      stop_dist_analyzer
       break
     fi
     sleep $SLEEP_INTERVAL
