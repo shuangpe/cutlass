@@ -94,6 +94,29 @@ verify_app() {
   echo "Verifying the application..."
 }
 
+# Function to print help message
+print_help() {
+  cat <<EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  --build               Build all applications.
+  --app <app_list>      Run specified applications (comma-separated, e.g. 0,1,2 or baseline,hacking).
+  --verify              Verify the application.
+  --help                Show this help message and exit.
+
+App mapping:
+  0 -> baseline
+  1 -> baseline.zeromask
+  2 -> hacking
+
+Examples:
+  $0 --build
+  $0 --app 0,2
+  $0 --app baseline,hacking
+EOF
+}
+
 # Function to parse command line arguments and set global variables
 parse_args() {
   while [[ "$#" -gt 0 ]]; do
@@ -115,8 +138,13 @@ parse_args() {
       --verify)
         VERIFY_APP=true
         ;;
+      --help)
+        print_help
+        exit 0
+        ;;
       *)
         echo "Unknown parameter passed: $1"
+        print_help
         exit 1
         ;;
     esac
