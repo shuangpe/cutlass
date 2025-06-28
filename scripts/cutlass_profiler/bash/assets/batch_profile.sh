@@ -41,7 +41,7 @@ start_dist_analyzer() {
     return
   fi
   # Try to find an existing process (by script path and output dir)
-  ANALYZE_PID=$(pgrep -f "analyze_distribution.py --quiet --scan_dir ${OUTPUT_DIR}/data/mat --output_dir ${OUTPUT_DIR}/data" | head -n 1)
+  ANALYZE_PID=$(pgrep -f "analyze_distribution.py" | head -n 1)
   if [ -z "$ANALYZE_PID" ] || ! ps -p "$ANALYZE_PID" > /dev/null 2>&1; then
     python3 "${SCRIPT_DIR}/analyze_distribution.py" --quiet --remove --scan_dir "${OUTPUT_DIR}/data/mat" --output_dir "${OUTPUT_DIR}/data" &
     ANALYZE_PID=$!
@@ -143,7 +143,7 @@ create_output_directory() {
   while true; do
     local candidate_dir="${date_prefix}_cutlass_profile_${dir_num}"
     OUTPUT_DIR="${base_dir%/}/${candidate_dir}"
-    if [ ! -d "$OUTPUT_DIR" ]; then
+    if ! ls "${OUTPUT_DIR}"* 1> /dev/null 2>&1; then
       OUTPUT_DIR="${OUTPUT_DIR}${dir_suffix}"
       mkdir -p "$OUTPUT_DIR" "$OUTPUT_DIR/data" "$OUTPUT_DIR/data/mat"
       log_info "Created output directory: $OUTPUT_DIR"
@@ -243,7 +243,6 @@ profile_kernel() {
 
   local output=${OUTPUT_DIR}/${kernel_name}_${freq}Mhz_mask${mask_ratio}_scope${scope}_run${current_run}
   local tags="Scenario:${scenario},Freq:${freq},Kernel:${kernel_name},ScopeMin:-${scope},ScopeMax:${scope},MaskRatio:${mask_ratio},WarmupIter:${warmup_iterations},ProfileIter:${profiling_iterations}"
-  log_info "runner.sh --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
 
   local dump_dir=${kernel_name}.${mask_ratio}.${scope}
   # Use global index to determine if dump_data is needed
@@ -255,6 +254,7 @@ profile_kernel() {
   fi
 
   command="${SCRIPT_DIR}/runners/runner.sh --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --dump_data ${dump_data} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
+  record_command "$command"
   record_command "$($command --dry)"
 
   if [ "$DRY_RUN" = "false" ]; then
@@ -484,6 +484,7 @@ main() {
   fi
 
   mv *log*.txt ${OUTPUT_DIR}
+  python3 "${SCRIPT_DIR}/process_log.py" "${OUTPUT_DIR}"
   zip -r ${OUTPUT_DIR}.zip ${OUTPUT_DIR} -x "*.mat" > /dev/null
   FULL_PATH=$(realpath "${OUTPUT_DIR}.zip")
   echo -e "\n  scp b200:${FULL_PATH} ."

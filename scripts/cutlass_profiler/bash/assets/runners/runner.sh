@@ -71,7 +71,7 @@ cmd="$profiler_app --kernels=${kernel} ${problem_shape_args} --providers=cutlass
   --dist=uniform,min:-${scope},max:${scope},scale:-1${extra_dist_args} --output=\"${output_path}.csv\" ${optional_args} 2>&1 | tee -a \"${output_path}.log.txt\""
 
 if [[ "$dry_run" == "true" ]]; then
-  echo "[DRY RUN] $cmd"
+  echo "$cmd"
 else
   eval $cmd
 fi
