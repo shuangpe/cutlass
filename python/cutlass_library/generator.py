@@ -8356,7 +8356,7 @@ def GenerateSM100_TensorOp_mixed_8bits_UMMA_gemm_with_block_scaled(manifest, cud
     for data_type in data_types:
       if (data_type["c_type"] != DataType.void):
         continue
-      if (data_type["d_type"] != DataType.e4m3 and data_type["d_type"] != DataType.f32):
+      if (data_type["d_type"] != DataType.e4m3):
         continue
       if ( data_type["a_type"] != DataType.e4m3 or data_type["b_type"] != DataType.e4m3):
         continue
