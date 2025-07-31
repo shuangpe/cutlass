@@ -7143,14 +7143,14 @@ def GenerateSM100_TensorOp_16b_UMMA_gemm(manifest, cuda_version, gemm_kind=GemmK
           0, [4, 1, 1], math_inst, min_cc, max_cc, cluster_shape))
 
     data_types = [
-      {
-        "a_type"   : math_inst.element_a,
-        "b_type"   : math_inst.element_b,
-        "c_type"   : math_inst.element_accumulator,
-        "d_type"   : math_inst.element_accumulator,
-        "acc_type" : math_inst.element_accumulator,
-        "epi_type" : math_inst.element_accumulator,
-      },
+      # {
+      #   "a_type"   : math_inst.element_a,
+      #   "b_type"   : math_inst.element_b,
+      #   "c_type"   : math_inst.element_accumulator,
+      #   "d_type"   : math_inst.element_accumulator,
+      #   "acc_type" : math_inst.element_accumulator,
+      #   "epi_type" : math_inst.element_accumulator,
+      # },
       {
         "a_type"   : math_inst.element_a,
         "b_type"   : math_inst.element_b,
