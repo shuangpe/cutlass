@@ -4,6 +4,7 @@ set -euo pipefail
 # Global variables for argument parsing results
 BUILD_APP=false
 VERIFY_APP=false
+DUMP_PTX=false
 APP_NAMES=()
 
 # Directory of the current script
@@ -30,7 +31,8 @@ build_baseline() {
     -DCUTLASS_ENABLE_TESTS=OFF \
     -DCUTLASS_LIBRARY_OPERATIONS=gemm \
     -DCUTLASS_LIBRARY_KERNELS=gemm_*_2sm \
-    -DCUTLASS_LIBRARY_IGNORE_KERNELS=stream
+    -DCUTLASS_LIBRARY_IGNORE_KERNELS=stream \
+    $([[ "$DUMP_PTX" == true ]] && echo "-DCUTLASS_NVCC_KEEP=ON")
   make cutlass_profiler -j32
 }
 
@@ -102,6 +104,7 @@ Options:
   --build               Build all applications.
   --app <app_list>      Run specified applications (comma-separated, e.g. 0,1,2 or baseline,hacking).
   --verify              Verify the application.
+  --dump_ptx            Enable PTX dumping during build.
   --help                Show this help message and exit.
 
 App mapping:
@@ -111,6 +114,7 @@ App mapping:
 
 Examples:
   $0 --build
+  $0 --build --dump_ptx
   $0 --app 0,2
   $0 --app baseline,hacking
 EOF
@@ -136,6 +140,9 @@ parse_args() {
         ;;
       --verify)
         VERIFY_APP=true
+        ;;
+      --dump_ptx)
+        DUMP_PTX=true
         ;;
       --help)
         print_help
