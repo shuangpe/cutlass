@@ -94,6 +94,10 @@ check_all_configs() {
   log_info "Scan Configuration:"
   log_info "  ${#freq[@]} Frequencies: ${freq[*]}"
   log_info "  ${#mask_ratios[@]} MaskRatios: ${mask_ratios[*]}"
+  log_info "  ${#problem_shape_array[@]} ProblemShapes:"
+  for ((i=0; i<${#problem_shape_array[@]}; i++)); do
+    log_info "    [$i]: ${problem_shape_array[$i]}"
+  done
   log_info "  ${#profile_iterations[@]} ProfileIterations:"
   for ((i=0; i<${#profile_iterations[@]}; i++)); do
     log_info "    [$i]: ${profile_iterations[$i]}"
@@ -118,7 +122,7 @@ check_all_configs() {
     IFS=',' read -r kernel_name operation <<< "${kernel_array[$i]}"
     local kernel_scopes=$(get_init_scope "$kernel_name")
     local scope_count=$(echo "$kernel_scopes" | wc -w)
-    local kernel_runs=$((${#freq[@]} * scope_count * ${#mask_ratios[@]} * ${#profile_iterations[@]}))
+    local kernel_runs=$((${#freq[@]} * scope_count * ${#mask_ratios[@]} * ${#profile_iterations[@]} * ${#problem_shape_array[@]}))
     total_runs=$((total_runs + kernel_runs))
     log_info "    Kernel [$i]: ${kernel_array[$i]} will run $kernel_runs tests"
   done
@@ -432,9 +436,15 @@ main() {
 
   for kernel_tuple in "${kernel_array[@]}"; do
     IFS=',' read -r kernel_name operation <<< "$kernel_tuple"
-    for freq_value in "${freq[@]}"; do
-      apply_frequency_and_run "$freq_value" "$kernel_name" "$operation"
-      log_info "Completed kernel $kernel_name frequency $freq_value runs: current progress $current_run/$total_runs"
+    for problem_shape in "${problem_shape_array[@]}"; do
+      IFS=',' read -r m n k <<< "$problem_shape"
+      export PROBLEM_SHAPE_ARGS="--m=${m} --n=${n} --k=${k}"
+      record_command "export PROBLEM_SHAPE_ARGS=\"--m=${m} --n=${n} --k=${k}\""
+      # Apply frequency and run the kernel analysis
+      for freq_value in "${freq[@]}"; do
+        apply_frequency_and_run "$freq_value" "$kernel_name" "$operation"
+        log_info "Completed kernel $kernel_name frequency $freq_value runs: current progress $current_run/$total_runs"
+      done
     done
   done
 
