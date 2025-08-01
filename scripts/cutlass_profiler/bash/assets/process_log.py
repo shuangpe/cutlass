@@ -213,21 +213,34 @@ def reorder_and_enhance_data(headers, data_rows):
     """
     # Define new column order
     new_order = [
-        "Freq", "Kernel", "Hacking", "MaskRatio", "TFLOPs", "TFLOPsPerWatt",
-        # "ScopeMin", "ScopeMax", "WarmupIter", "ProfileIter", "GPUAvgPowerMeanstable(W)", "MemAvgPowerMeanstable(W)",
-        "ScopeMin", "ScopeMax", "WarmupIter", "ProfileIter", "m", "n", "k", "GPUAvgPowerMeanstable(W)", "MemAvgPowerMeanstable(W)",
-        "GPUInstPowerMeanstable(W)", "GPUTempMeanstable(C)", "MemTempMeanstable(C)",
-        "SMClocksMeanstable(MHz)", "MemClocksMeanstable(MHz)", "GPUUtilMeanstable(%)",
-        "MemUtilMeanstable(%)"
+        "Precision", "ProblemShapeMNK", "RandomUniformDist", "Freq", "TransposeA", "TransposeB",
+        "Kernel", "Hacking", "MaskRatio", "TFLOPs", "TFLOPsPerWatt", "WarmupIter", "ProfileIter",
+        "GPUAvgPowerMeanstable(W)", "MemAvgPowerMeanstable(W)", "GPUInstPowerMeanstable(W)",
+        "GPUTempMeanstable(C)", "MemTempMeanstable(C)", "SMClocksMeanstable(MHz)",
+        "MemClocksMeanstable(MHz)", "GPUUtilMeanstable(%)", "MemUtilMeanstable(%)"
     ]
 
     # Get original column indices
     orig_indices = {header: i for i, header in enumerate(headers)}
+    
+    new_cols = ["Precision", "ProblemShapeMNK", "RandomUniformDist", "TransposeA", "TransposeB", "TFLOPsPerWatt"]
+
+    precision_dict = {
+        "FP16": "f16_f16",
+        "MXFP8": "ue8m0xe4m3_ue8m0xe4m3",
+        "NVFP4": "ue4m3xe2m1_ue4m3xe2m1"
+    }
+
+    def get_precision_from_kernel(kernel_name):
+        for precision, pattern in precision_dict.items():
+            if pattern in kernel_name:
+                return precision
+        return "Unknown"
 
     # Create new headers list
     new_headers = []
     for col in new_order:
-        if col == "TFLOPsPerWatt":  # New column
+        if col in new_cols:  # New column
             new_headers.append(col)
         elif col in orig_indices:
             new_headers.append(col)
@@ -238,7 +251,27 @@ def reorder_and_enhance_data(headers, data_rows):
         new_row = []
 
         for col in new_order:
-            if col == "TFLOPsPerWatt":
+            if col == "Precision":
+                kernelName = row[orig_indices["Kernel"]]
+                new_row.append(get_precision_from_kernel(kernelName))
+            elif col == "ProblemShapeMNK":
+                M = row[orig_indices["m"]]
+                N = row[orig_indices["n"]]
+                K = row[orig_indices["k"]]
+                new_row.append(f"{M}x{N}x{K}")
+            elif col == "RandomUniformDist":
+                scope_min = row[orig_indices["ScopeMin"]]
+                scope_max = row[orig_indices["ScopeMax"]]
+                new_row.append(f"[{scope_min}, {scope_max}]")
+            elif col == "TransposeA":
+                kernelName = row[orig_indices["Kernel"]]
+                trans_a = int("_nt" in kernelName or "_nn" in kernelName)
+                new_row.append(trans_a)
+            elif col == "TransposeB":
+                kernelName = row[orig_indices["Kernel"]]
+                trans_b = int("_nt" in kernelName or "_tt" in kernelName)
+                new_row.append(trans_b)
+            elif col == "TFLOPsPerWatt":
                 # Calculate TFLOPsPerWatt = TFLOPs / (GPU Power - Memory Power)
                 if "TFLOPs" in orig_indices and "GPUAvgPowerMeanstable(W)" in orig_indices and "MemAvgPowerMeanstable(W)" in orig_indices:
                     tflops = float(row[orig_indices["TFLOPs"]])
