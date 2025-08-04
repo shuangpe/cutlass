@@ -258,7 +258,6 @@ profile_kernel() {
   fi
 
   command="${SCRIPT_DIR}/runners/runner.sh --scope ${scope} --mask_ratio ${mask_ratio} --kernel ${kernel_name} --operation ${operation} --dump_data ${dump_data} --tags ${tags} --output ${output} --warmup-iterations ${warmup_iterations} --profiling-iterations ${profiling_iterations}"
-  record_command "$command"
   record_command "$($command --dry)"
 
   if [ "$DRY_RUN" = "false" ]; then
@@ -331,8 +330,10 @@ apply_frequency_and_run() {
     if [ "$freq_value" = "-1" ] || [ "$freq_value" = "oob" ]; then
       log_info "Resetting GPU clocks..."
       nvidia-smi -i ${gpu_id} --reset-gpu-clocks
+      record_command "nvidia-smi --reset-gpu-clocks -i ${gpu_id}"
     else
       freq_cmd_value=${freq_cmd_value//frequency/$freq_value}
+      record_command "$freq_cmd_value"
       log_info "$freq_cmd_value"
       eval $freq_cmd_value
     fi
@@ -439,7 +440,6 @@ main() {
     for problem_shape in "${problem_shape_array[@]}"; do
       IFS=',' read -r m n k <<< "$problem_shape"
       export PROBLEM_SHAPE_ARGS="--m=${m} --n=${n} --k=${k}"
-      record_command "export PROBLEM_SHAPE_ARGS=\"--m=${m} --n=${n} --k=${k}\""
       # Apply frequency and run the kernel analysis
       for freq_value in "${freq[@]}"; do
         apply_frequency_and_run "$freq_value" "$kernel_name" "$operation"

@@ -68,7 +68,7 @@ fi
 cmd="$profiler_app --kernels=${kernel} ${problem_shape_args} --providers=cutlass \
   --sleep-duration=3000 --warmup-iterations=${warmup_iterations} --profiling-iterations=${profiling_iterations} \
   --print-kernel-before-running=true --verification-enabled=false --initialization-provider=device \
-  --dist=uniform,min:-${scope},max:${scope},scale:-1${extra_dist_args} --output=\"${output_path}.csv\" ${optional_args} 2>&1 | tee -a \"${output_path}.log.txt\""
+  --dist=uniform,min:-${scope},max:${scope},scale:-1${extra_dist_args} ${optional_args} --output=\"${output_path}.csv\" 2>&1 | tee -a \"${output_path}.log.txt\""
 
 if [[ "$dry_run" == "true" ]]; then
   echo "$cmd"
