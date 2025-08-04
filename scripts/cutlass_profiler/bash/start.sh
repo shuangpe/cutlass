@@ -5,6 +5,7 @@ set -euo pipefail
 BUILD_APP=false
 VERIFY_APP=false
 DUMP_PTX=false
+CHECK_DIST=false  # Default value for --check_dist
 APP_NAMES=()
 
 # Directory of the current script
@@ -63,7 +64,13 @@ run_profile() {
   local cfg_file="$1"
   local out_dir="$2"
   local tag="$3"
-  bash "$assets_dir/batch_profile.sh" --tag "$tag" --output "$out_dir" \
+  local check_dist_flag=""
+
+  if [[ "$CHECK_DIST" == true ]]; then
+    check_dist_flag="--check_dist"
+  fi
+
+  bash "$assets_dir/batch_profile.sh" --tag "$tag" --output "$out_dir" $check_dist_flag \
     "$SCRIPT_DIR/assets/config/common.cfg" "$assets_dir/config/$cfg_file" | tee "full_log.$tag.txt"
 }
 
@@ -105,6 +112,7 @@ Options:
   --app <app_list>      Run specified applications (comma-separated, e.g. 0,1,2 or baseline,hacking).
   --verify              Verify the application.
   --dump_ptx            Enable PTX dumping during build.
+  --check_dist          Enable distribution checking during profiling.
   --help                Show this help message and exit.
 
 App mapping:
@@ -143,6 +151,9 @@ parse_args() {
         ;;
       --dump_ptx)
         DUMP_PTX=true
+        ;;
+      --check_dist)
+        CHECK_DIST=true
         ;;
       --help)
         print_help

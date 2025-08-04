@@ -250,9 +250,8 @@ profile_kernel() {
 
   local dump_dir=${kernel_name}.${mask_ratio}.${scope}
   # Use global index to determine if dump_data is needed
-  if [[ -n "${DUMP_DIR_INDEX[$dump_dir]}" ]]; then
-    dump_data=false
-  else
+  dump_data=false
+  if [[ "$CHECK_DIST" == "true" && -z "${DUMP_DIR_INDEX[$dump_dir]}" ]]; then
     dump_data=true
     DUMP_DIR_INDEX[$dump_dir]=1
   fi
@@ -360,6 +359,7 @@ main() {
   USER_TAG=""
   OUTPUT_BASE_DIR=""
   CONFIG_FILES=()
+  CHECK_DIST="false"  # Default value for --check_dist
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -388,13 +388,18 @@ main() {
           exit 1
         fi
         ;;
+      --check_dist)
+        CHECK_DIST="true"
+        log_info "Enabled check distribution mode"
+        shift
+        ;;
       *)
         # Collect all non-option arguments as config files
         if [[ -f "$1" ]]; then
           CONFIG_FILES+=("$1")
         else
           log_error "Unknown option or file not found: $1"
-          log_info "Usage: $0 [--dry] [--tag tagname] [--output dir] [config_file ...]"
+          log_info "Usage: $0 [--dry] [--tag tagname] [--output dir] [--check_dist] [config_file ...]"
           exit 1
         fi
         shift
